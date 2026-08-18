@@ -1,0 +1,17 @@
+# Data — never commit these
+data/
+*.csv
+*.json.gz
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+*.pem
+credentials.json
+
+# OS
+.DS_Store
