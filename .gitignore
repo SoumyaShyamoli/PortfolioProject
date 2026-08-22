@@ -15,3 +15,22 @@ credentials.json
 
 # OS
 .DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Terraform (later, but add now so you can't forget)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
+
+# dbt
+target/
+dbt_packages/
+logs/
+
+# Notebooks
+.ipynb_checkpoints/
