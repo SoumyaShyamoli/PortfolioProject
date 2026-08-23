@@ -114,6 +114,8 @@ how a sub-£10 budget quietly becomes a £40 bill. Create on demonstrated need.
 - If the Glue job fails on Glue API connectivity, add
   `com.amazonaws.eu-west-2.glue` as an interface endpoint, record the actual
   cost incurred, and delete it after the test window.
+**Resolved:** the first Glue run succeeded from the private subnet without a Glue interface endpoint, so the deferral was correct and no hourly cost was incurred. Revisit only if a future job needs Glue API calls the current one does not make.
+
 - Confirm the imported gateway endpoint is associated with **both** private
   route tables, not just one. Terraform will add the second association if it
   is missing.

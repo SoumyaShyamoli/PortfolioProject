@@ -26,6 +26,7 @@ credentials.json
 *.tfstate.*
 *.tfvars
 .terraform.lock.hcl
+.build/
 
 # dbt
 target/

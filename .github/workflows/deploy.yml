@@ -1,0 +1,114 @@
+name: Deploy
+
+# Runs on merge to main. Promotes the SAME artifact that was tested in dev to
+# prod — the file is uploaded, not rebuilt, so "it worked in dev" means
+# something.
+#
+# Deploys application artifacts only. Infrastructure changes are applied by a
+# human running terraform locally; see docs/cicd/SETUP.md for why.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'glue/**'
+      - 'ingestion/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:   # manual trigger, for redeploying without a code change
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+
+jobs:
+  deploy-dev:
+    name: Deploy to dev
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile check
+        run: python -m compileall -q ingestion glue
+
+      - name: Assume dev deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::009073574996:role/retail-dev-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload Glue script
+        run: |
+          aws s3 cp glue/jobs/json_to_parquet.py \
+            s3://sd-retail-dev-staged-009073574996-eu-west-2-an/_scripts/json_to_parquet.py
+
+      # Smoke test: run the job against a month that already exists in dev and
+      # confirm it succeeds. The job is idempotent, so re-running a month is
+      # safe — it replaces that partition rather than appending.
+      #
+      # This is what makes the dev stage meaningful rather than just an upload.
+      - name: Smoke test the Glue job
+        run: |
+          RUN_ID=$(aws glue start-job-run \
+            --job-name retail-dev-json-to-parquet \
+            --arguments '{"--year":"2010","--month":"12"}' \
+            --query JobRunId --output text)
+          echo "Started $RUN_ID"
+
+          for i in $(seq 1 40); do
+            sleep 15
+            STATE=$(aws glue get-job-run \
+              --job-name retail-dev-json-to-parquet --run-id "$RUN_ID" \
+              --query JobRun.JobRunState --output text)
+            echo "  $STATE"
+            case "$STATE" in
+              SUCCEEDED) exit 0 ;;
+              FAILED|TIMEOUT|STOPPED)
+                aws glue get-job-run --job-name retail-dev-json-to-parquet \
+                  --run-id "$RUN_ID" --query JobRun.ErrorMessage --output text
+                exit 1 ;;
+            esac
+          done
+
+          echo "::error::Job did not finish within 10 minutes"
+          exit 1
+
+  deploy-prod:
+    name: Deploy to prod
+    runs-on: ubuntu-latest
+    needs: deploy-dev        # prod only runs if the dev smoke test passed
+    environment: prod        # add a protection rule here to require approval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume prod deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Trust policy on this role is scoped to refs/heads/main, so this
+          # step cannot succeed from a branch or a fork's pull request.
+          role-to-assume: arn:aws:iam::009073574996:role/retail-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Same file, uploaded to a different bucket. Not rebuilt, not re-edited.
+      - name: Upload Glue script
+        run: |
+          aws s3 cp glue/jobs/json_to_parquet.py \
+            s3://sd-retail-prod-staged-009073574996-eu-west-2-an/_scripts/json_to_parquet.py
+
+      # Deliberately does NOT run the prod job. Prod runs are triggered
+      # explicitly — an automatic prod run on every merge would process data
+      # on a schedule nobody chose.
+      - name: Confirm
+        run: |
+          echo "Script deployed to prod. Trigger runs explicitly:"
+          echo "  aws glue start-job-run --job-name retail-prod-json-to-parquet \\"
+          echo "    --arguments '{\"--year\":\"2011\",\"--month\":\"1\"}'"

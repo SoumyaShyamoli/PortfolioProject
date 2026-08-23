@@ -28,8 +28,7 @@ sd-retail-{dev,prod}-{raw,staged,curated}-<account>-eu-west-2-an
 cleaning happens on ingest: cancellations, nulls, negative quantities and
 duplicates all land as they arrive.
 
-**Staged** holds Parquet, Snappy-compressed, partitioned by date, produced by
-a Glue job reading raw.
+**Staged** holds Parquet, Snappy-compressed, partitioned by year/month, produced by a Glue job reading a month of raw. The grain deliberately differs from raw — see ADR 0007.
 
 **Curated** holds modelled marts.
 

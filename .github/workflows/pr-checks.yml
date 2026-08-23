@@ -1,0 +1,139 @@
+name: PR checks
+
+# Runs on every pull request. Lints the Python, validates the Terraform, and
+# produces a plan against dev — posted as a PR comment so the diff is
+# reviewable before merge.
+#
+# Read-only. Nothing here changes infrastructure.
+
+on:
+  pull_request:
+    branches: [main]
+
+# Required for OIDC. Without id-token: write, the AWS credential step cannot
+# request a token and fails with a confusing "Not authorized" error.
+permissions:
+  id-token: write        # assume the AWS role via OIDC
+  contents: read         # check out the repo
+  pull-requests: write   # post the plan as a comment
+
+env:
+  AWS_REGION: eu-west-2
+  TF_VERSION: "1.9.8"
+
+jobs:
+  python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        run: pip install ruff
+
+      # Catches syntax errors before a broken script can be uploaded to S3.
+      # The Glue job in particular fails slowly and expensively if the script
+      # does not parse — a job run bills the one-minute minimum either way.
+      - name: Compile check
+        run: |
+          python -m compileall -q ingestion glue lambda
+
+      - name: Ruff
+        run: ruff check ingestion glue lambda
+
+  terraform:
+    name: Terraform plan (dev)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume dev deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::009073574996:role/retail-dev-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+          # No access keys anywhere. The role's trust policy allows any branch
+          # in this repo; the prod role is restricted to main.
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # fmt -check fails on unformatted code rather than reformatting it.
+      # Keeps the diff clean and stops style debates in review.
+      - name: Format check
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+        id: fmt
+
+      - name: Init
+        run: terraform init
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        id: plan
+        run: |
+          terraform plan -no-color -input=false -out=tfplan 2>&1 | tee plan.txt
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      # Fail the check if the plan would destroy anything. A destroy in a PR
+      # plan is almost always a mistake — a renamed resource, a changed
+      # immutable field — and it should block the merge rather than surprise
+      # someone at apply time.
+      - name: Block destructive changes
+        run: |
+          if grep -qE "will be destroyed|must be replaced" plan.txt; then
+            echo "::error::Plan contains destroy or replace operations."
+            grep -E "will be destroyed|must be replaced" plan.txt
+            exit 1
+          fi
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = fs.readFileSync('infra/terraform/plan.txt', 'utf8');
+
+            // GitHub comments cap at 65536 characters.
+            const LIMIT = 60000;
+            if (plan.length > LIMIT) {
+              plan = plan.slice(0, LIMIT) + '\n\n...truncated. See the workflow log.';
+            }
+
+            const body = [
+              '### Terraform plan (dev)',
+              '',
+              `Format check: \`${{ steps.fmt.outcome }}\``,
+              '',
+              '<details><summary>Show plan</summary>',
+              '',
+              '```terraform',
+              plan,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Fail if plan errored
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

@@ -8,14 +8,22 @@
 # Generated originally by `terraform plan -generate-config-out`; the verbose
 # provider defaults have been removed and the policies corrected.
 
+
+
+
+
 locals {
-  github_repo = "SoumyaShyamoli/PortfolioProject"
+  github_repo    = "SoumyaShyamoli/PortfolioProject"
+  tfstate_bucket = "sd-retail-tfstate-009073574996-eu-west-2-an"
+  tfstate_key    = "platform/terraform.tfstate"
 
   # Must match local.glue_script_key in glue.tf. The deploy roles need write
   # access to exactly this prefix — an earlier version granted "scripts/*"
   # while the job read from "_scripts/", so deploys would have 403'd.
   script_prefix = "_scripts"
 }
+
+
 
 # --- GitHub OIDC provider ------------------------------------------------
 
@@ -238,6 +246,21 @@ resource "aws_iam_role_policy" "dev_cicd_deploy" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "TerraformState"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = [
+          "arn:aws:s3:::${local.tfstate_bucket}/${local.tfstate_key}",
+          "arn:aws:s3:::${local.tfstate_bucket}/${local.tfstate_key}.tflock",
+        ]
+      },
+      {
+        Sid      = "TerraformStateList"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = ["arn:aws:s3:::${local.tfstate_bucket}"]
+      },
+      {
         Sid      = "GlueJobDeployDev"
         Effect   = "Allow"
         Action   = ["glue:CreateJob", "glue:UpdateJob", "glue:GetJob", "glue:DeleteJob", "glue:StartJobRun", "glue:GetJobRun", "glue:GetConnection", "glue:CreateConnection", "glue:UpdateConnection"]
@@ -281,6 +304,21 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      {
+        Sid    = "TerraformState"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = [
+          "arn:aws:s3:::${local.tfstate_bucket}/${local.tfstate_key}",
+          "arn:aws:s3:::${local.tfstate_bucket}/${local.tfstate_key}.tflock",
+        ]
+      },
+      {
+        Sid      = "TerraformStateList"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = ["arn:aws:s3:::${local.tfstate_bucket}"]
+      },
       {
         Sid      = "GlueJobDeployProd"
         Effect   = "Allow"
@@ -375,4 +413,18 @@ resource "aws_iam_role_policy" "human_admin" {
       },
     ]
   })
+}
+
+
+# terraform plan must read every managed resource to compute a diff.
+# Enumerating every Describe*/Get* across S3, IAM, EC2, Glue and Lambda by
+# hand would break each time a resource type is added.
+#
+# Note this grants account-wide read, including s3:GetObject. Acceptable
+# here — public research dataset, OIDC-only assumption from this repo,
+# one-hour sessions. On a platform with real PII the right answer is a
+# custom read-only policy with GetObject excluded.
+resource "aws_iam_role_policy_attachment" "dev_cicd_readonly" {
+  role       = aws_iam_role.dev_cicd_deploy.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
