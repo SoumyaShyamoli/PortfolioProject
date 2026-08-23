@@ -1,0 +1,53 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3ReadRawProd",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::sd-retail-prod-raw-009073574996-eu-west-2-an",
+        "arn:aws:s3:::sd-retail-prod-raw-009073574996-eu-west-2-an/*"
+      ]
+    },
+    {
+      "Sid": "S3WriteStagedCuratedProd",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::sd-retail-prod-curated-009073574996-eu-west-2-an",
+        "arn:aws:s3:::sd-retail-prod-curated-009073574996-eu-west-2-an/*",
+        "arn:aws:s3:::sd-retail-prod-staged-009073574996-eu-west-2-an",
+        "arn:aws:s3:::sd-retail-prod-staged-009073574996-eu-west-2-an/*"
+      ]
+    },
+    {
+      "Sid": "GlueCatalogAccess",
+      "Effect": "Allow",
+      "Action": [
+        "glue:GetTable",
+        "glue:GetDatabase",
+        "glue:CreateTable",
+        "glue:UpdateTable"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:/aws-glue/*"
+    }
+  ]
+}

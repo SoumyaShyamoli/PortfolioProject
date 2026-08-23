@@ -1,0 +1,40 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "GlueJobDeployProd",
+      "Effect": "Allow",
+      "Action": [
+        "glue:CreateJob",
+        "glue:UpdateJob",
+        "glue:GetJob",
+        "glue:DeleteJob",
+        "glue:StartJobRun",
+        "glue:GetJobRun"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3DeployArtifactsProd",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::sd-retail-prod-staged-009073574996-eu-west-2-an/scripts/*"
+      ]
+    },
+    {
+      "Sid": "PassRoleToGlueProd",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::009073574996:role/retail-prod-pipeline-exec-role",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "glue.amazonaws.com"
+        }
+      }
+    }
+  ]
+}
