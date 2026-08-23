@@ -14,13 +14,16 @@
       ]
     },
     {
-      "Sid": "S3WriteStagedCuratedProd",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:ListBucket"
-      ],
+      "Sid": "S3WriteStagedProd",
+  "Effect": "Allow",
+  "Action": [
+    "s3:GetObject",
+    "s3:PutObject",
+    "s3:DeleteObject",
+    "s3:ListBucket",
+    "s3:AbortMultipartUpload",
+    "s3:ListMultipartUploadParts"
+  ],
       "Resource": [
         "arn:aws:s3:::sd-retail-prod-curated-009073574996-eu-west-2-an",
         "arn:aws:s3:::sd-retail-prod-curated-009073574996-eu-west-2-an/*",
