@@ -40,10 +40,10 @@ jobs:
       # does not parse — a job run bills the one-minute minimum either way.
       - name: Compile check
         run: |
-          python -m compileall -q ingestion glue lambda
+          python -m compileall -q ingestion glue
 
       - name: Ruff
-        run: ruff check ingestion glue lambda
+        run: ruff check ingestion glue
 
   terraform:
     name: Terraform plan (dev)

@@ -1,0 +1,14 @@
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = [
+    # Shebangs cannot carry an exec bit through git on Windows.
+    "EXE001",
+]
+
+[lint.per-file-ignores]
+# Glue injects awsglue at runtime; it is not installable locally, so imports
+# from it cannot be resolved by static analysis.
+"glue/jobs/*.py" = ["E402"]

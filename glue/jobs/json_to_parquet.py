@@ -38,7 +38,7 @@ from awsglue.context import GlueContext
 from awsglue.job import Job
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
-from pyspark.sql.functions import col, month as month_of, to_date, to_timestamp, year as year_of
+#from pyspark.sql.functions import col, month as month_of, to_date, to_timestamp, year as year_of
 from pyspark.sql.types import (
     DoubleType,
     IntegerType,
