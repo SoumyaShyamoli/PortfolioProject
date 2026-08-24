@@ -35,3 +35,7 @@ logs/
 
 # Notebooks
 .ipynb_checkpoints/
+tfplan
+*.tfplan
+destroyplan
+plan.txt

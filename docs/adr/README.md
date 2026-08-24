@@ -87,6 +87,8 @@ decision, why, what it costs, and what was rejected.
 | [0005](docs/adr/0005-s3-layout-and-raw-immutability.md) | Bucket per layer per environment; raw is immutable NDJSON |
 | [0006](docs/adr/0006-glue-over-emr.md) | AWS Glue rather than EMR for Spark workloads |
 | [0007](docs/adr/0007-monthly-partitions-and-enforced-recon.md) | Monthly staged partitions; reconciliation enforced, not logged |
+| [0007](docs/adr/0007-monthly-partitions-and-enforced-recon.md) | Monthly staged partitions; reconciliation enforced, not logged |
+| [0008](docs/adr/0008-oidc-trust-immutable-ids.md) | Pin GitHub OIDC trust to immutable owner and repository IDs |
 
 ---
 
