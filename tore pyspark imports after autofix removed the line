@@ -1,0 +1,33 @@
+[1mdiff --git a/glue/jobs/json_to_parquet.py b/glue/jobs/json_to_parquet.py[m
+[1mindex 7c64f6b..a511382 100644[m
+[1m--- a/glue/jobs/json_to_parquet.py[m
+[1m+++ b/glue/jobs/json_to_parquet.py[m
+[36m@@ -1,5 +1,5 @@[m
+ """[m
+[31m-Glue job: raw NDJSON -> staged Parquet, with reconciliation and test.[m
+[32m+[m[32mGlue job: raw NDJSON -> staged Parquet, with reconciliation.[m
+ [m
+ Reads ONE MONTH of daily NDJSON partitions from the raw bucket, converts them[m
+ to Snappy-compressed Parquet partitioned by year/month, writes to the staged[m
+[36m@@ -11,8 +11,7 @@[m [mDesign notes:[m
+     belongs in dbt staging, with raw as the replay point (docs/adr/0005).[m
+   * Raw stays daily; staged is monthly. Daily partitions at this volume would[m
+     produce ~1,400-row Parquet files, i.e. the small-file problem. Monthly[m
+[31m-    gives ~40k rows per partition and 25 partitions across the dataset —[m
+[31m-    enough to demonstrate pruning and incremental loading.[m
+[32m+[m[32m    gives ~40k rows per partition and 25 partitions across the dataset.[m
+   * ONE RUN OWNS ONE OUTPUT PARTITION. The job reads a whole month and writes[m
+     that month. Running it against a single day while partitioning by month[m
+     would dynamic-overwrite the rest of the month out of existence.[m
+[36m@@ -38,8 +37,9 @@[m [mfrom awsglue.context import GlueContext[m
+ from awsglue.job import Job[m
+ from awsglue.utils import getResolvedOptions[m
+ from pyspark.context import SparkContext[m
+[31m-[m
+[31m-#from pyspark.sql.functions import col, month as month_of, to_date, to_timestamp, year as year_of[m
+[32m+[m[32mfrom pyspark.sql.functions import col, to_timestamp[m
+[32m+[m[32mfrom pyspark.sql.functions import month as month_of[m
+[32m+[m[32mfrom pyspark.sql.functions import year as year_of[m
+ from pyspark.sql.types import ([m
+     DoubleType,[m
+     IntegerType,[m

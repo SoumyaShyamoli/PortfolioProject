@@ -4,11 +4,7 @@ variable "region" {
   default     = "eu-west-2"
 }
 
-variable "aws_profile" {
-  description = "Local AWS CLI profile used to authenticate"
-  type        = string
-  default     = "retail-dev"
-}
+
 
 variable "account_id" {
   description = "AWS account ID — part of the globally-unique bucket names"

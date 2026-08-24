@@ -11,8 +11,7 @@ Design notes:
     belongs in dbt staging, with raw as the replay point (docs/adr/0005).
   * Raw stays daily; staged is monthly. Daily partitions at this volume would
     produce ~1,400-row Parquet files, i.e. the small-file problem. Monthly
-    gives ~40k rows per partition and 25 partitions across the dataset —
-    enough to demonstrate pruning and incremental loading.
+    gives ~40k rows per partition and 25 partitions across the dataset.
   * ONE RUN OWNS ONE OUTPUT PARTITION. The job reads a whole month and writes
     that month. Running it against a single day while partitioning by month
     would dynamic-overwrite the rest of the month out of existence.
@@ -38,7 +37,9 @@ from awsglue.context import GlueContext
 from awsglue.job import Job
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
-from pyspark.sql.functions import col, month as month_of, to_date, to_timestamp, year as year_of
+from pyspark.sql.functions import col, to_timestamp
+from pyspark.sql.functions import month as month_of
+from pyspark.sql.functions import year as year_of
 from pyspark.sql.types import (
     DoubleType,
     IntegerType,

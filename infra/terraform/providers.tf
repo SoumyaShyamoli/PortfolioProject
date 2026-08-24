@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.7"
+  required_version = ">= 1.10"
 
   required_providers {
     aws = {
@@ -20,11 +20,13 @@ terraform {
 }
 
 provider "aws" {
-  region  = var.region
-  profile = var.aws_profile
+  region = var.region
 
-  # Every resource gets these. Cost allocation by tag is what makes the
-  # cost/performance case study possible later.
+  # No profile here. Locally, set AWS_PROFILE in your shell:
+  #   export AWS_PROFILE=retail-dev
+  # In CI, credentials come from the assumed role via the standard chain.
+  # Hardcoding a profile works on one laptop and breaks everywhere else.
+
   default_tags {
     tags = {
       Project   = "retail-data-platform"

@@ -8,12 +8,27 @@
 # Generated originally by `terraform plan -generate-config-out`; the verbose
 # provider defaults have been removed and the policies corrected.
 
-
-
-
-
 locals {
-  github_repo    = "SoumyaShyamoli/PortfolioProject"
+  # --- GitHub OIDC subject claim ----------------------------------------
+  # This repository has "Include enterprise/organization and repository IDs
+  # in the OIDC token subject" enabled, so the sub claim is NOT the familiar
+  # "repo:OWNER/REPO:..." form. It is:
+  #
+  #   repo:OWNER@OWNER_ID/REPO@REPO_ID:...
+  #
+  # e.g. repo:SoumyaShyamoli@127630731/PortfolioProject@1338715381:pull_request
+  #
+  # Matching on the ID-qualified form is the stronger choice: owner and repo
+  # IDs are immutable, so trust survives a rename, and a repository that took
+  # over this name after a transfer could not assume these roles. Verified by
+  # decoding the token payload in CI — see docs/study/02-command-reference.md.
+  github_owner    = "SoumyaShyamoli"
+  github_owner_id = "127630731"
+  github_repo     = "PortfolioProject"
+  github_repo_id  = "1338715381"
+
+  github_sub_prefix = "repo:${local.github_owner}@${local.github_owner_id}/${local.github_repo}@${local.github_repo_id}"
+
   tfstate_bucket = "sd-retail-tfstate-009073574996-eu-west-2-an"
   tfstate_key    = "platform/terraform.tfstate"
 
@@ -22,8 +37,6 @@ locals {
   # while the job read from "_scripts/", so deploys would have 403'd.
   script_prefix = "_scripts"
 }
-
-
 
 # --- GitHub OIDC provider ------------------------------------------------
 
@@ -191,12 +204,17 @@ resource "aws_iam_role_policy" "prod_pipeline_exec" {
 # =========================================================================
 # CI/CD deploy roles — assumed by GitHub Actions via OIDC
 # =========================================================================
-# No static access keys exist. The prod role's trust is scoped to the main
-# branch, so a pull request from a fork cannot obtain production credentials.
+# No static access keys exist.
+#
+# dev  — any ref in this repository, including pull_request events.
+# prod — pushes to main only. Note this means the prod role is NOT assumable
+#        from a pull request, because a PR's sub ends in ":pull_request"
+#        rather than ":ref:refs/heads/main". That is the intended behaviour:
+#        production deploys happen on merge, not on proposal.
 
 resource "aws_iam_role" "dev_cicd_deploy" {
   name        = "retail-dev-cicd-deploy-role"
-  description = "GitHub Actions deploy - dev (any branch)"
+  description = "GitHub Actions deploy - dev (any ref)"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -209,7 +227,7 @@ resource "aws_iam_role" "dev_cicd_deploy" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:*"
+          "token.actions.githubusercontent.com:sub" = "${local.github_sub_prefix}:*"
         }
       }
     }]
@@ -231,7 +249,7 @@ resource "aws_iam_role" "prod_cicd_deploy" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = "${local.github_sub_prefix}:ref:refs/heads/main"
         }
       }
     }]
@@ -414,7 +432,6 @@ resource "aws_iam_role_policy" "human_admin" {
     ]
   })
 }
-
 
 # terraform plan must read every managed resource to compute a diff.
 # Enumerating every Describe*/Get* across S3, IAM, EC2, Glue and Lambda by
