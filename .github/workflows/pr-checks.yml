@@ -10,8 +10,9 @@ on:
   pull_request:
     branches: [main]
 
-# Required for OIDC. Without id-token: write, the AWS credential step cannot
-# request a token and fails with a confusing "Not authorized" error.
+# Required for OIDC. Without id-token: write the AWS credential step cannot
+# request a token, and the failure surfaces as "Not authorized to perform
+# sts:AssumeRoleWithWebIdentity" rather than anything about a missing token.
 permissions:
   id-token: write        # assume the AWS role via OIDC
   contents: read         # check out the repo
@@ -20,6 +21,7 @@ permissions:
 env:
   AWS_REGION: eu-west-2
   TF_VERSION: "1.9.8"
+  AWS_ACCOUNT_ID: "009073574996"
 
 jobs:
   python:
@@ -35,13 +37,13 @@ jobs:
       - name: Install tooling
         run: pip install ruff
 
-      # Catches syntax errors before a broken script can be uploaded to S3.
-      # The Glue job in particular fails slowly and expensively if the script
-      # does not parse — a job run bills the one-minute minimum either way.
+      # Catches syntax errors before a broken script reaches S3. A Glue job
+      # whose script does not parse still bills the one-minute minimum.
       - name: Compile check
-        run: |
-          python -m compileall -q ingestion glue
+        run: python -m compileall -q ingestion glue
 
+      # Note: ruff.toml sets target-version = "py310" to match the Glue
+      # runtime, so it will not suggest 3.11+ syntax that would fail there.
       - name: Ruff
         run: ruff check ingestion glue
 
@@ -55,43 +57,66 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # TEMPORARY — remove once OIDC is confirmed working.
+      # Decodes the ID token payload to show the exact sub/aud claims AWS
+      # evaluates against the role's trust policy. No signature is verified
+      # and nothing secret is printed; these are the same claims AWS sees.
+      - name: Debug OIDC claims
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const payload = JSON.parse(
+              Buffer.from(token.split('.')[1], 'base64').toString()
+            );
+            core.info('sub:        ' + payload.sub);
+            core.info('aud:        ' + payload.aud);
+            core.info('repository: ' + payload.repository);
+            core.info('ref:        ' + payload.ref);
+            core.info('event_name: ' + payload.event_name);
+
       - name: Assume dev deploy role
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::009073574996:role/retail-dev-cicd-deploy-role
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-dev-cicd-deploy-role
           aws-region: ${{ env.AWS_REGION }}
-          # No access keys anywhere. The role's trust policy allows any branch
-          # in this repo; the prod role is restricted to main.
+          # No access keys anywhere. The dev role's trust allows any ref in
+          # this repo; the prod role is restricted to refs/heads/main.
+
+      - name: Confirm identity
+        run: aws sts get-caller-identity
 
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # fmt -check fails on unformatted code rather than reformatting it.
-      # Keeps the diff clean and stops style debates in review.
+      # Fails on unformatted code rather than reformatting it, so the diff
+      # stays clean and formatting does not become a review topic.
       - name: Format check
+        id: fmt
         run: terraform fmt -check -recursive
         continue-on-error: true
-        id: fmt
 
       - name: Init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: Validate
         run: terraform validate
 
       - name: Plan
         id: plan
+        # set -o pipefail so the step's exit code comes from terraform rather
+        # than from tee, which would otherwise always report success.
         run: |
+          set -o pipefail
           terraform plan -no-color -input=false -out=tfplan 2>&1 | tee plan.txt
-          echo "exitcode=$?" >> $GITHUB_OUTPUT
         continue-on-error: true
 
-      # Fail the check if the plan would destroy anything. A destroy in a PR
-      # plan is almost always a mistake — a renamed resource, a changed
-      # immutable field — and it should block the merge rather than surprise
-      # someone at apply time.
+      # A destroy or replace in a PR plan is almost always a mistake — a
+      # renamed resource, or a changed immutable field. Block the merge rather
+      # than let it surprise someone at apply time.
       - name: Block destructive changes
+        if: steps.plan.outcome == 'success'
         run: |
           if grep -qE "will be destroyed|must be replaced" plan.txt; then
             echo "::error::Plan contains destroy or replace operations."
@@ -105,7 +130,13 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let plan = fs.readFileSync('infra/terraform/plan.txt', 'utf8');
+            const planPath = 'infra/terraform/plan.txt';
+
+            // The plan file will not exist if an earlier step failed. Say so
+            // rather than crashing the comment step on ENOENT.
+            let plan = fs.existsSync(planPath)
+              ? fs.readFileSync(planPath, 'utf8')
+              : 'Plan did not run — an earlier step failed. See the workflow log.';
 
             // GitHub comments cap at 65536 characters.
             const LIMIT = 60000;
@@ -117,6 +148,7 @@ jobs:
               '### Terraform plan (dev)',
               '',
               `Format check: \`${{ steps.fmt.outcome }}\``,
+              `Plan: \`${{ steps.plan.outcome }}\``,
               '',
               '<details><summary>Show plan</summary>',
               '',
