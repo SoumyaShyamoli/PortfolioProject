@@ -1,5 +1,5 @@
 """
-Glue job: raw NDJSON -> staged Parquet, with reconciliation.
+Glue job: raw NDJSON -> staged Parquet, with reconciliation and test.
 
 Reads ONE MONTH of daily NDJSON partitions from the raw bucket, converts them
 to Snappy-compressed Parquet partitioned by year/month, writes to the staged
