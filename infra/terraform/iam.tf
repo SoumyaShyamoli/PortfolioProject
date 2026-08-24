@@ -21,7 +21,7 @@ locals {
   # Matching on the ID-qualified form is the stronger choice: owner and repo
   # IDs are immutable, so trust survives a rename, and a repository that took
   # over this name after a transfer could not assume these roles. Verified by
-  # decoding the token payload in CI — see docs/study/02-command-reference.md.
+  # decoding the token payload in CI — see docs/adr/0008.
   github_owner    = "SoumyaShyamoli"
   github_owner_id = "127630731"
   github_repo     = "PortfolioProject"
@@ -206,11 +206,17 @@ resource "aws_iam_role_policy" "prod_pipeline_exec" {
 # =========================================================================
 # No static access keys exist.
 #
-# dev  — any ref in this repository, including pull_request events.
-# prod — pushes to main only. Note this means the prod role is NOT assumable
-#        from a pull request, because a PR's sub ends in ":pull_request"
-#        rather than ":ref:refs/heads/main". That is the intended behaviour:
-#        production deploys happen on merge, not on proposal.
+# The sub claim varies by how the job is triggered:
+#
+#   pull request                  ...:pull_request
+#   push to a branch              ...:ref:refs/heads/main
+#   job with `environment: NAME`  ...:environment:NAME
+#
+# The last one matters: declaring `environment:` in a workflow job CHANGES
+# the claim, so a policy matching only ref:refs/heads/main will reject a job
+# that runs under an environment. This was found the hard way — the prod
+# deploy failed with a generic "Not authorized" after the dev deploy
+# succeeded, because the dev role's wildcard matched either form.
 
 resource "aws_iam_role" "dev_cicd_deploy" {
   name        = "retail-dev-cicd-deploy-role"
@@ -236,7 +242,7 @@ resource "aws_iam_role" "dev_cicd_deploy" {
 
 resource "aws_iam_role" "prod_cicd_deploy" {
   name        = "retail-cicd-deploy-role"
-  description = "GitHub Actions deploy - prod (main branch only)"
+  description = "GitHub Actions deploy - prod (via prod environment only)"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -247,9 +253,20 @@ resource "aws_iam_role" "prod_cicd_deploy" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        }
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = "${local.github_sub_prefix}:ref:refs/heads/main"
+
+          # Deliberately StringEquals, not StringLike, and deliberately the
+          # environment claim rather than the branch ref.
+          #
+          # This role is assumable ONLY by a job declaring
+          # `environment: prod`. Branch restriction has not been lost — it
+          # moved to the environment's own "Selected branches: main" rule,
+          # which GitHub evaluates BEFORE minting a token. The environment
+          # also carries a required-reviewer rule, so production deploys now
+          # pass two gates (branch + human approval) where the ref-based
+          # policy enforced only one.
+          #
+          # See docs/adr/0008.
+          "token.actions.githubusercontent.com:sub" = "${local.github_sub_prefix}:environment:prod"
         }
       }
     }]
