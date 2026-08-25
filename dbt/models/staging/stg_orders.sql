@@ -8,7 +8,7 @@
 }}
 
 /*
-    Cleaned order lines. One row per invoice line.
+    Cleaned order lines. One row per invoice line
 
     REPROCESSING MODEL — the point of this configuration:
 
