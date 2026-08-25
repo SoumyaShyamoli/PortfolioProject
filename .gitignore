@@ -25,6 +25,7 @@ credentials.json
 *.tfstate
 *.tfstate.*
 *.tfvars
+!terraform.auto.tfvars
 .terraform.lock.hcl
 .build/
 

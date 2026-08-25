@@ -2,10 +2,10 @@ name: dbt
 
 # Two jobs with different risk profiles:
 #
-#   compile  — runs on every PR. Parses and compiles the project without
-#              touching data. Catches broken SQL, bad refs, missing sources.
-#   build    — runs on merge to main. Actually builds models and runs tests
-#              against dev, including the reconciliation controls.
+#   compile  — runs on every PR. Parses and compiles without touching data.
+#              Catches broken SQL, bad refs, missing sources.
+#   build    — runs on merge to main. Builds models and runs tests against
+#              dev, including the reconciliation controls.
 #
 # The reconciliation tests are the reason this workflow exists. A control
 # that only runs when someone remembers to type `dbt test` is not a control.
@@ -62,20 +62,17 @@ jobs:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-dev-cicd-deploy-role
           aws-region: ${{ env.AWS_REGION }}
 
-      # dbt compile needs a live connection to resolve sources and check that
-      # referenced relations exist. It reads metadata only — no writes.
+      # NOTE: no `trap` here. A trap fires when the STEP's shell exits, which
+      # is before dbt ever runs — the key would be deleted immediately after
+      # being written. Cleanup is a separate always() step at the end of the
+      # job instead.
       - name: Fetch Snowflake key
         run: |
-          # Deleted on exit even if a later step fails. Without the trap, a
-          # crashed run leaves the key on the runner filesystem — see ADR 0010.
-          trap 'rm -f /tmp/sf_key.p8' EXIT
-
           aws ssm get-parameter \
             --name "/retail/dev/snowflake/private_key" \
             --with-decryption \
             --query "Parameter.Value" --output text > /tmp/sf_key.p8
           chmod 600 /tmp/sf_key.p8
-
           echo "SNOWFLAKE_DEV_KEY_PATH=/tmp/sf_key.p8" >> $GITHUB_ENV
 
       - name: Write profiles.yml
@@ -109,8 +106,8 @@ jobs:
       - name: dbt compile
         run: dbt compile
 
-      # Fails if a model, source or column has no description. Documentation
-      # rots when it is optional.
+      # Documentation that is optional rots. This fails the PR if a model has
+      # no description.
       - name: Check documentation coverage
         run: |
           python - <<'PY'
@@ -129,6 +126,14 @@ jobs:
               sys.exit(1)
           print("All models documented.")
           PY
+
+      # Runs even if earlier steps failed. GitHub-hosted runners are
+      # destroyed after the job, so this is defence in depth rather than the
+      # only protection — what it actually reduces is exposure to anything
+      # else running within the same job.
+      - name: Remove Snowflake key
+        if: always()
+        run: rm -f /tmp/sf_key.p8
 
   # =========================================================================
   # Merge: build and test against dev.
@@ -161,7 +166,6 @@ jobs:
 
       - name: Fetch Snowflake key
         run: |
-          trap 'rm -f /tmp/sf_key.p8' EXIT
           aws ssm get-parameter \
             --name "/retail/dev/snowflake/private_key" \
             --with-decryption \
@@ -194,17 +198,18 @@ jobs:
       - name: dbt seed
         run: dbt seed
 
-      # `dbt build` runs models and their tests in dependency order, so a
-      # failing test stops downstream models rather than letting them build
-      # on bad data. `run` then `test` would build everything first and only
-      # then discover the problem.
+      # `dbt build` interleaves models and their tests in dependency order,
+      # so a failing test stops downstream models rather than letting them
+      # build on bad data. `run` then `test` would build everything first and
+      # only then discover the problem — wrong for a pipeline whose whole
+      # story is reconciliation gating.
       - name: dbt build
         id: build
         run: dbt build
 
-      # Independent of dbt's own exit code. Reads the reconciliation model
-      # directly and reports it, so the numbers appear in the run summary
-      # whether or not the tests passed.
+      # Independent of dbt's exit code. Reads the reconciliation model and
+      # puts it in the run summary whether or not the tests passed — a
+      # mismatch is more useful visible than buried in a failure log.
       - name: Reconciliation report
         if: always()
         run: |
@@ -230,9 +235,6 @@ jobs:
             echo '```'
           } >> $GITHUB_STEP_SUMMARY
 
-      # Generated docs as a build artifact. Not published anywhere yet —
-      # GitHub Pages would be the obvious home, deferred until the model
-      # set is worth browsing.
       - name: Generate docs
         if: success()
         run: dbt docs generate
@@ -246,3 +248,7 @@ jobs:
             dbt/target/catalog.json
             dbt/target/index.html
           retention-days: 14
+
+      - name: Remove Snowflake key
+        if: always()
+        run: rm -f /tmp/sf_key.p8
