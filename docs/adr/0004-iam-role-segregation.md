@@ -127,3 +127,53 @@ control if anyone else ever gets credentials.
 - Verify the pipeline execution roles carry the EC2 network permissions Glue
   needs to run inside a VPC (`CreateNetworkInterface`, `DescribeSubnets` and
   related) before the first VPC-attached job run.
+
+
+## Amendment — 2026-08-24: the incremental-permissions story stopped being true
+
+The original decision recorded that the builder identity
+(`retail-dev-admin`) started narrow and gained permissions on demand, with
+each addition traceable to a specific failed operation. That was accurate at
+the time and I stand by the reasoning, but it is no longer what the account
+looks like.
+
+**What happened.** Nine service-specific managed policies accumulated one
+failure at a time — S3, Glue, Lambda, Kinesis Firehose, CloudWatch Logs,
+EventBridge, VPC, SNS, CloudWatch — alongside `IAMFullAccess`. Attaching a
+tenth for SSM hit IAM's hard quota of 10 managed policies per user.
+
+**What I did.** Detached the nine and attached `PowerUserAccess`, which covers
+every service except IAM and Organizations. The identity now holds
+`PowerUserAccess` + `IAMFullAccess`.
+
+**Why I am not treating this as a regression.** The incremental grants were
+never a real constraint. An identity holding `IAMFullAccess` can grant itself
+anything at any time — the narrow policies documented what the platform
+needed, they did not limit what the operator could do. Hitting the quota
+forced the pretence to stop rather than removing a control.
+
+The honest framing is that this is a single-operator project and the operator
+is effectively an administrator. The least-privilege work that demonstrates
+something real is on the **service roles** — Glue execution, Lambda
+execution, CI/CD deploy — which remain scoped to specific buckets, specific
+prefixes and specific actions. Those are the roles a compromise would
+actually flow through, and they are unchanged.
+
+**What a real platform would do instead.** Split the human identity by
+function: a platform engineer who can create roles, an analyst who cannot,
+elevated capability assumed temporarily via `sts:AssumeRole` rather than held
+permanently. A permission boundary on the builder identity would cap what it
+can grant itself even with `IAMFullAccess`. Neither is worth the friction for
+one person; both are the correct answer the moment there are two.
+
+**Why the builder identity is not in Terraform.** It is the identity that
+runs Terraform. Managing it from the configuration it applies is the same
+chicken-and-egg as the state bucket — a bad apply could revoke access
+mid-run, leaving no way to fix it except the root account. It stays created
+by hand and outside state, deliberately. No Terraform change was needed for
+this amendment.
+
+**Consequence.** The account no longer has a meaningful record of which
+permissions the platform actually requires, because that record was the list
+of attached policies. If that matters later, the way to reconstruct it is
+CloudTrail or IAM Access Analyzer rather than the policy list.

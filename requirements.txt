@@ -1,3 +1,5 @@
 pandas
 boto3
 ruff
+dbt-core
+dbt-snowflake
