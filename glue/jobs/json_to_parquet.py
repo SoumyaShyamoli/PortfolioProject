@@ -263,6 +263,8 @@ recon = {
 }
 
 print("RECON_RESULT " + json.dumps(recon))
+if not balanced:
+    print("RECON_UNBALANCED")
 
 # Persist the audit record — small JSON per run, queryable later via Athena
 # over the _audit prefix. This is the evidence behind the data quality

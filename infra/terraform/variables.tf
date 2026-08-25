@@ -30,6 +30,16 @@ variable "noncurrent_version_expiration_days" {
   default     = 90
 }
 
+variable "alert_email_dev" {
+  description = "Email address for dev pipeline failure alerts"
+  type        = string
+}
+
+variable "alert_email_prod" {
+  description = "Email address for prod pipeline failure alerts"
+  type        = string
+}
+
 locals {
   environments = ["dev", "prod"]
   layers       = ["raw", "staged", "curated"]
