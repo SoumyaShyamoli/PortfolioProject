@@ -1,0 +1,248 @@
+name: dbt
+
+# Two jobs with different risk profiles:
+#
+#   compile  — runs on every PR. Parses and compiles the project without
+#              touching data. Catches broken SQL, bad refs, missing sources.
+#   build    — runs on merge to main. Actually builds models and runs tests
+#              against dev, including the reconciliation controls.
+#
+# The reconciliation tests are the reason this workflow exists. A control
+# that only runs when someone remembers to type `dbt test` is not a control.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'dbt/**'
+      - '.github/workflows/dbt-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'dbt/**'
+      - '.github/workflows/dbt-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: eu-west-2
+  AWS_ACCOUNT_ID: "009073574996"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # =========================================================================
+  # PR: compile only. No warehouse writes.
+  # =========================================================================
+  compile:
+    name: Compile
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dbt
+        run: pip install dbt-core dbt-snowflake
+
+      - name: Assume dev deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-dev-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      # dbt compile needs a live connection to resolve sources and check that
+      # referenced relations exist. It reads metadata only — no writes.
+      - name: Fetch Snowflake key
+        run: |
+          # Deleted on exit even if a later step fails. Without the trap, a
+          # crashed run leaves the key on the runner filesystem — see ADR 0010.
+          trap 'rm -f /tmp/sf_key.p8' EXIT
+
+          aws ssm get-parameter \
+            --name "/retail/dev/snowflake/private_key" \
+            --with-decryption \
+            --query "Parameter.Value" --output text > /tmp/sf_key.p8
+          chmod 600 /tmp/sf_key.p8
+
+          echo "SNOWFLAKE_DEV_KEY_PATH=/tmp/sf_key.p8" >> $GITHUB_ENV
+
+      - name: Write profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILE'
+          retail_platform:
+            target: dev
+            outputs:
+              dev:
+                type: snowflake
+                account: BRTNPNX-IH35235
+                user: RETAIL_DEV_USER
+                private_key_path: "{{ env_var('SNOWFLAKE_DEV_KEY_PATH') }}"
+                role: RETAIL_TRANSFORMER_DEV
+                warehouse: RETAIL_WH
+                database: RETAIL_DEV
+                schema: PUBLIC
+                threads: 4
+          PROFILE
+
+      - name: dbt deps
+        run: dbt deps
+
+      - name: dbt parse
+        run: dbt parse
+
+      # Compiles every model to SQL without executing it. Catches bad refs,
+      # missing sources, Jinja errors, and columns referenced but not
+      # produced.
+      - name: dbt compile
+        run: dbt compile
+
+      # Fails if a model, source or column has no description. Documentation
+      # rots when it is optional.
+      - name: Check documentation coverage
+        run: |
+          python - <<'PY'
+          import json, sys, pathlib
+
+          manifest = json.loads(pathlib.Path("target/manifest.json").read_text())
+          undocumented = [
+              node["name"]
+              for node in manifest["nodes"].values()
+              if node["resource_type"] == "model" and not node.get("description", "").strip()
+          ]
+          if undocumented:
+              print("Models with no description:")
+              for name in undocumented:
+                  print(f"  - {name}")
+              sys.exit(1)
+          print("All models documented.")
+          PY
+
+  # =========================================================================
+  # Merge: build and test against dev.
+  # =========================================================================
+  build:
+    name: Build and test (dev)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: dev
+    defaults:
+      run:
+        working-directory: dbt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dbt
+        run: pip install dbt-core dbt-snowflake
+
+      - name: Assume dev deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-dev-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fetch Snowflake key
+        run: |
+          trap 'rm -f /tmp/sf_key.p8' EXIT
+          aws ssm get-parameter \
+            --name "/retail/dev/snowflake/private_key" \
+            --with-decryption \
+            --query "Parameter.Value" --output text > /tmp/sf_key.p8
+          chmod 600 /tmp/sf_key.p8
+          echo "SNOWFLAKE_DEV_KEY_PATH=/tmp/sf_key.p8" >> $GITHUB_ENV
+
+      - name: Write profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILE'
+          retail_platform:
+            target: dev
+            outputs:
+              dev:
+                type: snowflake
+                account: BRTNPNX-IH35235
+                user: RETAIL_DEV_USER
+                private_key_path: "{{ env_var('SNOWFLAKE_DEV_KEY_PATH') }}"
+                role: RETAIL_TRANSFORMER_DEV
+                warehouse: RETAIL_WH
+                database: RETAIL_DEV
+                schema: PUBLIC
+                threads: 4
+          PROFILE
+
+      - name: dbt deps
+        run: dbt deps
+
+      - name: dbt seed
+        run: dbt seed
+
+      # `dbt build` runs models and their tests in dependency order, so a
+      # failing test stops downstream models rather than letting them build
+      # on bad data. `run` then `test` would build everything first and only
+      # then discover the problem.
+      - name: dbt build
+        id: build
+        run: dbt build
+
+      # Independent of dbt's own exit code. Reads the reconciliation model
+      # directly and reports it, so the numbers appear in the run summary
+      # whether or not the tests passed.
+      - name: Reconciliation report
+        if: always()
+        run: |
+          dbt show --inline "
+            select
+                period,
+                ndjson_source_lines,
+                glue_wrote_to_s3,
+                snowflake_loaded,
+                dbt_staging_rows,
+                s3_to_snowflake_diff,
+                snowflake_to_staging_diff,
+                recon_status
+            from {{ ref('fct_pipeline_reconciliation') }}
+            order by period
+          " --limit 50 | tee recon.txt
+
+          {
+            echo "### Pipeline reconciliation"
+            echo ""
+            echo '```'
+            cat recon.txt
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      # Generated docs as a build artifact. Not published anywhere yet —
+      # GitHub Pages would be the obvious home, deferred until the model
+      # set is worth browsing.
+      - name: Generate docs
+        if: success()
+        run: dbt docs generate
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: dbt-docs
+          path: |
+            dbt/target/manifest.json
+            dbt/target/catalog.json
+            dbt/target/index.html
+          retention-days: 14
