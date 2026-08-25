@@ -1,0 +1,33 @@
+version: 2
+
+seeds:
+  - name: country_mapping
+    description: >
+      Maps the retail dataset's free-text country values to World Bank ISO3
+      codes. Hand-built from the 43 distinct values in the source.
+
+      mapping_type records HOW confident each row is:
+        exact       name matches the World Bank entity
+        alias       known alternative name (EIRE, USA, RSA, Czech Republic)
+        assumed     a judgment call — 'Korea' is ambiguous between ROK and
+                    DPRK; mapped to South on commercial plausibility
+        unmappable  no World Bank equivalent exists
+
+      The exact/assumed distinction matters. It tells the next person which
+      rows to question.
+
+    columns:
+      - name: retail_country
+        description: Value as it appears in the source data.
+        tests:
+          - unique
+          - not_null
+
+      - name: worldbank_country_id
+        description: ISO3 code. Null where mapping_type is 'unmappable'.
+
+      - name: mapping_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['exact', 'alias', 'assumed', 'unmappable']

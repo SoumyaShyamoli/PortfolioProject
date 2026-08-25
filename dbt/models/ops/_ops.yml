@@ -1,0 +1,48 @@
+version: 2
+
+models:
+  - name: stg_glue_recon
+    description: >
+      Latest Glue reconciliation record per period. Reruns append to the raw
+      table, so this deduplicates to current truth while history stays
+      available underneath.
+    columns:
+      - name: period
+        description: YYYY-MM. One row per period after dedupe.
+        tests:
+          - unique
+          - not_null
+      - name: glue_balanced
+        description: Whether the Glue job's own three-point recon balanced.
+
+  - name: fct_pipeline_reconciliation
+    description: >
+      End-to-end row counts across every pipeline hop. The control that
+      catches silent data loss between S3, Snowflake and dbt.
+    columns:
+      - name: period
+        tests:
+          - unique
+          - not_null
+
+      - name: recon_status
+        description: ok, or which hop disagrees.
+        tests:
+          # THE test. Any value other than 'ok' means rows were lost or
+          # gained somewhere between the source file and the warehouse.
+          - accepted_values:
+              values: ['ok']
+              config:
+                severity: error
+
+      - name: s3_to_snowflake_diff
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 0
+
+      - name: snowflake_to_staging_diff
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 0

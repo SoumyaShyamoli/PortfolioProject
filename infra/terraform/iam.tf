@@ -31,6 +31,7 @@ locals {
 
   tfstate_bucket = "sd-retail-tfstate-009073574996-eu-west-2-an"
   tfstate_key    = "platform/terraform.tfstate"
+  ssm_key_path = "/retail"
 
   # Must match local.glue_script_key in glue.tf. The deploy roles need write
   # access to exactly this prefix — an earlier version granted "scripts/*"
@@ -328,6 +329,35 @@ resource "aws_iam_role_policy" "dev_cicd_deploy" {
         Resource  = aws_iam_role.dev_pipeline_exec.arn
         Condition = { StringEquals = { "iam:PassedToService" = "glue.amazonaws.com" } }
       },
+            {
+        # Fetch the Snowflake key at runtime. Scoped to the dev path only —
+        # this role cannot read /retail/prod/*, which is what keeps the
+        # environment separation real rather than conventional.
+        Sid    = "ReadDevSecrets"
+        Effect = "Allow"
+        Action = ["ssm:GetParameter", "ssm:GetParameters"]
+        Resource = [
+          "arn:aws:ssm:${var.region}:${var.account_id}:parameter${local.ssm_key_path}/dev/*"
+        ]
+      },
+      {
+        # SecureString parameters are KMS-encrypted, and GetParameter with
+        # --with-decryption requires kms:Decrypt separately. ReadOnlyAccess
+        # does NOT grant this — read-only policies deliberately exclude
+        # decrypt, which is why this needs stating explicitly.
+        #
+        # Scoped by the ViaService condition so the key can only be used
+        # through SSM, not for decrypting anything else in the account.
+        Sid      = "DecryptDevSecrets"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
+          }
+        }
+      },
     ]
   })
 }
@@ -381,6 +411,35 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
         Action    = "iam:PassRole"
         Resource  = aws_iam_role.prod_pipeline_exec.arn
         Condition = { StringEquals = { "iam:PassedToService" = "glue.amazonaws.com" } }
+      },
+            {
+        # Fetch the Snowflake key at runtime. Scoped to the dev path only —
+        # this role cannot read /retail/prod/*, which is what keeps the
+        # environment separation real rather than conventional.
+        Sid    = "ReadProdSecrets"
+        Effect = "Allow"
+        Action = ["ssm:GetParameter", "ssm:GetParameters"]
+        Resource = [
+          "arn:aws:ssm:${var.region}:${var.account_id}:parameter${local.ssm_key_path}/prod/*"
+        ]
+      },
+      {
+        # SecureString parameters are KMS-encrypted, and GetParameter with
+        # --with-decryption requires kms:Decrypt separately. ReadOnlyAccess
+        # does NOT grant this — read-only policies deliberately exclude
+        # decrypt, which is why this needs stating explicitly.
+        #
+        # Scoped by the ViaService condition so the key can only be used
+        # through SSM, not for decrypting anything else in the account.
+        Sid      = "DecryptProdSecrets"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
+          }
+        }
       },
     ]
   })

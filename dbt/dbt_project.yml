@@ -1,0 +1,55 @@
+name: 'retail_platform'
+version: '1.0.0'
+config-version: 2
+
+profile: 'retail_platform'
+
+model-paths:   ["models"]
+seed-paths:    ["seeds"]
+test-paths:    ["tests"]
+macro-paths:   ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  retail_platform:
+    # Staging is a thin, cheap layer — views avoid storing a second copy of
+    # data that is only ever read by intermediate models.
+    staging:
+      +materialized: view
+      +schema: staging
+
+    # Intermediate models get joined repeatedly by marts, so materialising
+    # them as tables trades storage for not re-computing the same joins.
+    intermediate:
+      +materialized: table
+      +schema: intermediate
+
+    marts:
+      +materialized: table
+      +schema: marts
+
+    # Operational models — reconciliation, run metadata. Views: small, and
+    # always want the current picture rather than a snapshot.
+    ops:
+      +materialized: view
+      +schema: ops
+
+seeds:
+  retail_platform:
+    +schema: staging
+    country_mapping:
+      +column_types:
+        retail_country: varchar
+        worldbank_country_id: varchar
+        mapping_type: varchar
+        note: varchar
+
+vars:
+  # Periods before this are not expected in the warehouse. Used by freshness
+  # and completeness tests so a missing 2009 partition does not fail the run
+  # while dev only holds a couple of months.
+  earliest_expected_period: '2010-12'

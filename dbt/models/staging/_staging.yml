@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: >
+      Cleaned order lines, one row per invoice line. Incremental with
+      delete+insert on period, so reprocessing a month replaces it — the
+      same guarantee Glue gives in S3. See ADR 0012.
+
+    columns:
+      - name: invoice_no
+        tests:
+          - not_null
+
+      - name: period
+        description: YYYY-MM. The partition key for reprocessing.
+        tests:
+          - not_null
+
+      - name: line_type
+        description: normal, cancellation, negative_adjustment, or zero_or_negative_price.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['normal', 'cancellation', 'negative_adjustment', 'zero_or_negative_price']
+
+      - name: is_cancellation
+        tests:
+          - not_null
+
+      - name: line_amount
+        description: quantity * unit_price. Negative on cancellations, by design.
+        tests:
+          - not_null
+
+      - name: source_system
+        tests:
+          - accepted_values:
+              values: ['batch_historical', 'stream_live']
+
+      - name: duplicate_occurrence
+        description: >
+          1 for the first instance of an otherwise identical row, 2+ for
+          repeats. Duplicates are kept, not dropped — see the model comment.
+        tests:
+          - not_null
+
+    tests:
+      # Cancellations must have negative quantity. If one does not, either
+      # the source changed or the flag logic is wrong.
+      - dbt_utils.expression_is_true:
+          expression: "quantity < 0"
+          config:
+            where: "is_cancellation = true"
+            severity: warn

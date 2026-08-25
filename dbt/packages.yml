@@ -1,0 +1,6 @@
+packages:
+  # Adds tests dbt core does not have: expression_is_true,
+  # equal_rowcount, at_least_one, and the generic tests used across
+  # the schema.yml files here.
+  - package: dbt-labs/dbt_utils
+    version: [">=1.3.0", "<2.0.0"]
