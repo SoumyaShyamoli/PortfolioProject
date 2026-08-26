@@ -17,11 +17,13 @@ locals {
   snowflake_integrations = {
     dev = {
       staged_bucket = local.buckets["dev-staged"].name
+      raw_bucket    = local.buckets["dev-raw"].name 
       role_name     = "retail-dev-snowflake-integration-role"
       external_id   = var.snowflake_external_id_dev
     }
     prod = {
       staged_bucket = local.buckets["prod-staged"].name
+      raw_bucket    = local.buckets["prod-raw"].name 
       role_name     = "retail-prod-snowflake-integration-role"
       external_id   = var.snowflake_external_id_prod
     }
@@ -97,6 +99,26 @@ resource "aws_iam_role_policy" "snowflake_integration" {
         Condition = {
           StringLike = {
             "s3:prefix" = ["orders/*", "_audit/*"]
+          }
+        }
+      },
+      {
+        # World Bank reference data only. NOT the orders prefix — Snowflake
+        # reads orders from staged (Parquet), and granting raw access to
+        # orders would let it bypass the Glue conversion entirely.
+        Sid      = "ReadRawWorldBank"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource = ["arn:aws:s3:::${each.value.raw_bucket}/worldbank/*"]
+      },
+      {
+        Sid      = "ListRawWorldBank"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket", "s3:GetBucketLocation"]
+        Resource = "arn:aws:s3:::${each.value.raw_bucket}"
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["worldbank/*"]
           }
         }
       },

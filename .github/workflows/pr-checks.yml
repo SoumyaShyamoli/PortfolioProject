@@ -104,6 +104,21 @@ jobs:
       - name: Validate
         run: terraform validate
 
+      # Static security analysis. Soft-fail: it flags things that are
+      # genuinely deliberate here (no KMS on buckets holding public research
+      # data, no bucket-level logging), and a hard fail would mean either
+      # suppressing real findings or building controls the project has
+      # documented as out of scope.
+      #
+      # The findings appear in the PR so they are a decision each time, not
+      # a silent pass.
+      - name: tfsec
+        uses: aquasecurity/tfsec-pr-commenter-action@v1.3.1
+        with:
+          github_token: ${{ github.token }}
+          working_directory: infra/terraform
+          soft_fail: true
+
       - name: Plan
         id: plan
         # set -o pipefail so the step's exit code comes from terraform rather
