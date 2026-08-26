@@ -153,3 +153,6 @@ exists to prevent.
 - Add a test asserting no duplicate `(period, source_file)` combinations in
   `RAW.ORDERS`, which would catch the double-load failure directly rather
   than via a count mismatch.
+
+
+**Discovered characteristic (2026-08-25):** the source's true exact-duplicate rate is ~30%, not the ~1% originally assumed when the duplicate-stability test was written. Verified genuine against raw Parquet — identical invoice, stock code, quantity, timestamp (to the millisecond) and price. The reconciliation chain does not and cannot catch this, since Glue counts duplicate rows as rows; source lines, S3 writes, and Snowflake loads all agree regardless. This is the boundary of what row-count reconciliation proves: no rows lost in transit, not that arriving rows match expectation. Marts must deduplicate explicitly (filter duplicate_occurrence = 1) to produce a true order count; staging keeps every row per ADR 0005.
