@@ -13,11 +13,6 @@ sources:
     tables:
       - name: orders
         description: Order lines from staged Parquet, one row per invoice line.
-
-        # Freshness is measured on loaded_at, not invoice_date. The data is
-        # historical — invoice_date is always 2009-2011 — so measuring
-        # freshness on it would fail permanently. What matters is whether
-        # the LOAD is running.
         loaded_at_field: loaded_at
         freshness:
           warn_after: {count: 7, period: day}
@@ -25,64 +20,65 @@ sources:
 
         columns:
           - name: invoice_no
-            description: >
-              Invoice identifier. A leading 'C' marks a cancellation — those
-              rows carry negative quantity and are the source's way of
-              recording a return.
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: stock_code
-            description: Product identifier. Not strictly numeric — some are codes like POST, M, DOT.
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: quantity
-            description: Units. Negative on cancellations and some adjustments.
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: invoice_date
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: unit_price
-            description: Price in GBP. Zero and negative values exist in the source.
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: customer_id
-            description: >
-              Nullable — roughly a quarter of rows have no customer id.
-              Believed to be guest or aggregated transactions. Kept, not
-              dropped: excluding them would break revenue totals against
-              the source.
 
           - name: country
-            description: Ship-to country. Free text, includes non-countries like 'Unspecified'.
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: source_system
-            description: batch_historical or stream_live. Set at ingestion, used to trace provenance after the union.
             tests:
               - not_null
               - accepted_values:
                   values: ['batch_historical', 'stream_live']
 
           - name: partition_year
-            description: Parsed from the S3 path, not present in the Parquet file itself.
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: partition_month
-            tests:
-              - not_null
+            tests: [not_null]
 
           - name: source_file
-            description: S3 key the row came from. The first thing you want when a count does not reconcile.
+            tests: [not_null]
+
+      # ✅ Added here under raw.tables
+      - name: worldbank_countries
+        description: >
+          Country metadata from the World Bank API. Includes aggregates
+          ('World', 'Euro area') which are filtered in
+          stg_worldbank_countries rather than at ingest, per ADR 0005.
+        columns:
+          - name: country_id
+            tests: [unique, not_null]
+          - name: country_name
+            tests: [not_null]
+          - name: region_id
+
+      - name: worldbank_indicators
+        description: >
+          GDP (NY.GDP.MKTP.CD) and population (SP.POP.TOTL), one row per
+          country-indicator-year. Pinned to 2010.
+        columns:
+          - name: country_id
+          - name: indicator_id
             tests:
               - not_null
+              - accepted_values:
+                  values: ['NY.GDP.MKTP.CD', 'SP.POP.TOTL']
+          - name: value
 
   - name: ops
     database: "{{ target.database }}"
@@ -92,11 +88,7 @@ sources:
     tables:
       - name: glue_recon_raw
         description: >
-          One VARIANT row per Glue job run. Kept as raw JSON so a change to
-          the audit record shape does not need a DDL change. Reruns append
-          rather than replace, so a period can have several records —
-          stg_glue_recon takes the latest.
+          One VARIANT row per Glue job run.
         columns:
           - name: recon_record
-            tests:
-              - not_null
+            tests: [not_null]

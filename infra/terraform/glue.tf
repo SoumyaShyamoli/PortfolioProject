@@ -112,7 +112,8 @@ resource "aws_glue_job" "json_to_parquet" {
 
     "--enable-metrics"                   = "true"
     "--enable-continuous-cloudwatch-log" = "true"
-    "--enable-spark-ui"                  = "false" # writes event logs to S3; not needed
+    "--enable-spark-ui"          = "true"
+    "--spark-event-logs-path"    = "s3://${each.value.staged_bucket}/_glue-temp/spark-logs/"
     "--TempDir"                          = "s3://${each.value.staged_bucket}/_glue-temp/"
   }
 

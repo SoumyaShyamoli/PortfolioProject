@@ -91,3 +91,34 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
 
   depends_on = [aws_s3_bucket_versioning.this]
 }
+
+# Glue writes shuffle and spill data to _glue-temp/ and does not clean up
+# after itself. Seven days is well beyond any job's lifetime here (the job
+# timeout is 15 minutes) while leaving room to inspect a failed run's
+# artefacts.
+resource "aws_s3_bucket_lifecycle_configuration" "staged_temp" {
+  for_each = {
+    for k, v in local.buckets : k => v if v.layer == "staged"
+  }
+
+  bucket = aws_s3_bucket.this[each.key].id
+
+  rule {
+    id     = "expire-glue-temp"
+    status = "Enabled"
+
+    filter {
+      prefix = "_glue-temp/"
+    }
+
+    expiration {
+      days = 7
+    }
+
+    # Multipart uploads that failed mid-write leave parts behind that are
+    # invisible in the console and still billed.
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 3
+    }
+  }
+}

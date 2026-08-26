@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: stg_worldbank_countries
+    description: >
+      World Bank countries with aggregates ('World', 'Euro area', regional
+      groupings) removed. About 250 rows from roughly 300 in raw.
+    columns:
+      - name: country_id
+        description: ISO3 code. The join key to the country mapping seed.
+        tests:
+          - unique
+          - not_null
+      - name: country_name
+        tests:
+          - not_null
+      - name: region_name
+        description: World Bank region. Never 'NA' here — those rows are filtered out.
+        tests:
+          - not_null
+
+  - name: stg_worldbank_indicators
+    description: >
+      GDP and population per country-year, pivoted from the long-format
+      source. Nulls mean the World Bank has no figure, not that data is
+      missing.
+    columns:
+      - name: country_id
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+      - name: gdp_per_capita_usd
+        description: Derived from gdp_usd / population rather than fetched separately.
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - country_id
+            - year

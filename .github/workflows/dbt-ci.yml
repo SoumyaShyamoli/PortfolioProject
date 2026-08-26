@@ -194,6 +194,17 @@ jobs:
 
       - name: dbt deps
         run: dbt deps
+        
+      # Freshness measured on loaded_at, not invoice_date — the data is
+      # historical, so invoice_date would always be stale. What this checks
+      # is whether the LOAD is running.
+      #
+      # continue-on-error: freshness failing means the pipeline has not run
+      # recently, which is worth knowing but should not block a code change
+      # from being tested.
+      - name: dbt source freshness
+        run: dbt source freshness
+        continue-on-error: true
 
       - name: dbt seed
         run: dbt seed

@@ -18,8 +18,11 @@ models:
   retail_platform:
     # Staging is a thin, cheap layer — views avoid storing a second copy of
     # data that is only ever read by intermediate models.
+    # No project-level materialization. stg_orders is incremental
+    # (partition-replace, ADR 0012); the World Bank staging models are
+    # views. Stating a single default here would be wrong for one of them.
     staging:
-      +materialized: view
+      #+materialized: view
       +schema: staging
 
     # Intermediate models get joined repeatedly by marts, so materialising
