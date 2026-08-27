@@ -1,0 +1,159 @@
+name: Airflow DAG deploy
+
+# Same promotion pattern as deploy.yml (Glue) and dbt-ci.yml (dbt): dev gets
+# the change first, on every push to main; prod is a separate, approval-
+# gated job that only runs after dev succeeds.
+#
+# "Deploy" here means: upload the DAG file to S3, then use SSM send-command
+# to copy it onto the instance. There is no inbound network path to these
+# boxes (ADR 0014) — SSM is the only way in, for humans and for CI alike.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'airflow/dags/**'
+      - '.github/workflows/airflow-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  AWS_ACCOUNT_ID: "009073574996"
+
+jobs:
+  deploy-dev:
+    name: Deploy DAGs to dev
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume dev deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-dev-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload DAG files to S3
+        run: |
+          aws s3 sync airflow/dags/ \
+            s3://sd-retail-dev-staged-009073574996-eu-west-2-an/_airflow-dags/ \
+            --delete --only-show-errors
+
+      - name: Get dev instance ID
+        id: instance
+        run: |
+          ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=retail-dev-airflow" "Name=instance-state-name,Values=running,stopped" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          if [ "$ID" == "None" ]; then
+            echo "::error::No dev Airflow instance found."
+            exit 1
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Check instance is running
+        id: state
+        run: |
+          STATE=$(aws ec2 describe-instances --instance-ids ${{ steps.instance.outputs.id }} \
+            --query "Reservations[0].Instances[0].State.Name" --output text)
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          if [ "$STATE" != "running" ]; then
+            echo "::warning::Dev Airflow instance is $STATE, not running. DAGs uploaded to S3 but not synced to the instance. Start it and re-run this workflow, or the next scheduled sync will pick it up."
+          fi
+
+      - name: Sync DAGs onto the instance
+        if: steps.state.outputs.state == 'running'
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids ${{ steps.instance.outputs.id }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["aws s3 sync s3://sd-retail-dev-staged-009073574996-eu-west-2-an/_airflow-dags/ /opt/airflow/dags/ --delete","chown -R airflow:airflow /opt/airflow/dags/"]' \
+            --query "Command.CommandId" --output text)
+
+          # SSM commands are fire-and-forget by default; poll for the result
+          # so a broken sync fails this workflow rather than reporting green.
+          for i in $(seq 1 20); do
+            sleep 5
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" --instance-id ${{ steps.instance.outputs.id }} \
+              --query "Status" --output text 2>/dev/null || echo "Pending")
+            case "$STATUS" in
+              Success) echo "DAG sync succeeded."; exit 0 ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD_ID" \
+                  --instance-id ${{ steps.instance.outputs.id }} --query "StandardErrorContent"
+                exit 1 ;;
+            esac
+          done
+          echo "::error::SSM command did not complete within the poll window."
+          exit 1
+
+  deploy-prod:
+    name: Deploy DAGs to prod
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    environment: prod   # required reviewer gate, same as the Glue deploy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume prod deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload DAG files to S3
+        run: |
+          aws s3 sync airflow/dags/ \
+            s3://sd-retail-prod-staged-009073574996-eu-west-2-an/_airflow-dags/ \
+            --delete --only-show-errors
+
+      - name: Get prod instance ID
+        id: instance
+        run: |
+          ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=retail-prod-airflow" "Name=instance-state-name,Values=running,stopped" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Check instance is running
+        id: state
+        run: |
+          STATE=$(aws ec2 describe-instances --instance-ids ${{ steps.instance.outputs.id }} \
+            --query "Reservations[0].Instances[0].State.Name" --output text)
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          if [ "$STATE" != "running" ]; then
+            echo "::notice::Prod Airflow instance is $STATE. DAG uploaded to S3; will sync next time the instance starts."
+          fi
+
+      - name: Sync DAGs onto the instance
+        if: steps.state.outputs.state == 'running'
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids ${{ steps.instance.outputs.id }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["aws s3 sync s3://sd-retail-prod-staged-009073574996-eu-west-2-an/_airflow-dags/ /opt/airflow/dags/ --delete","chown -R airflow:airflow /opt/airflow/dags/"]' \
+            --query "Command.CommandId" --output text)
+
+          for i in $(seq 1 20); do
+            sleep 5
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" --instance-id ${{ steps.instance.outputs.id }} \
+              --query "Status" --output text 2>/dev/null || echo "Pending")
+            case "$STATUS" in
+              Success) echo "DAG sync succeeded."; exit 0 ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD_ID" \
+                  --instance-id ${{ steps.instance.outputs.id }} --query "StandardErrorContent"
+                exit 1 ;;
+            esac
+          done
+          echo "::error::SSM command did not complete within the poll window."
+          exit 1
