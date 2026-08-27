@@ -548,6 +548,19 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
         Action   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
         Resource = "*"
       },
+      {
+        # Needed to resolve the running instance's ID by tag before sending
+        # the SSM command. Read-only, describe-only — this does not grant
+        # any control over instances, only visibility into their metadata.
+        # Unlike dev (which has the broader ReadOnlyAccess policy attached),
+        # prod gets exactly this one action, scoped to nothing narrower
+        # than account-wide since DescribeInstances does not support
+        # resource-level restriction.
+        Sid      = "DescribeAirflowInstancesProd"
+        Effect   = "Allow"
+        Action   = ["ec2:DescribeInstances"]
+        Resource = "*"
+      },
     ]
   })
 }
