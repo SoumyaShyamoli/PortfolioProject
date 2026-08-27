@@ -31,7 +31,7 @@ locals {
 
   tfstate_bucket = "sd-retail-tfstate-009073574996-eu-west-2-an"
   tfstate_key    = "platform/terraform.tfstate"
-  ssm_key_path = "/retail"
+  ssm_key_path   = "/retail"
 
   # Must match local.glue_script_key in glue.tf. The deploy roles need write
   # access to exactly this prefix — an earlier version granted "scripts/*"

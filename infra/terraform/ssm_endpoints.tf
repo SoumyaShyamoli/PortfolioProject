@@ -25,8 +25,8 @@ variable "enable_ssm_endpoints" {
     they exist again within about a minute; nothing about them is
     stateful.
   EOT
-  type    = bool
-  default = true
+  type        = bool
+  default     = true
 }
 
 locals {

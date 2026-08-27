@@ -112,9 +112,9 @@ resource "aws_iam_role_policy" "airflow" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "GlueJobControl"
-        Effect = "Allow"
-        Action = ["glue:StartJobRun", "glue:GetJobRun", "glue:GetJobRuns"]
+        Sid      = "GlueJobControl"
+        Effect   = "Allow"
+        Action   = ["glue:StartJobRun", "glue:GetJobRun", "glue:GetJobRuns"]
         Resource = "arn:aws:glue:${var.region}:${var.account_id}:job/retail-${each.key}-*"
       },
       {
@@ -139,9 +139,9 @@ resource "aws_iam_role_policy" "airflow" {
         # not through the Snowflake integration — this is Airflow reading S3
         # object listings to confirm data landed before triggering a load,
         # not reading the objects themselves.
-        Sid      = "ListOwnBuckets"
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
+        Sid    = "ListOwnBuckets"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
         Resource = [
           "arn:aws:s3:::${local.buckets["${each.key}-raw"].name}",
           "arn:aws:s3:::${local.buckets["${each.key}-staged"].name}",
@@ -191,8 +191,8 @@ resource "aws_instance" "airflow" {
   # its disk, so Airflow, dbt and the DAG files all persist across a
   # stop/start cycle.
   user_data = templatefile("${path.module}/../../scripts/airflow_bootstrap.sh.tpl", {
-    environment = each.key
-    aws_region  = var.region
+    environment      = each.key
+    aws_region       = var.region
     s3_staged_bucket = local.buckets["${each.key}-staged"].name
   })
 
