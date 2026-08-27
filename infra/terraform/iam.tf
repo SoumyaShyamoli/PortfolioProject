@@ -377,26 +377,39 @@ resource "aws_iam_role_policy" "dev_cicd_deploy" {
       },
       {
         # Lets the deploy workflow push a synced DAG file onto the running
-        # dev instance via SSM. Both resource ARNs are required — the
-        # target instance AND the document being run — either one missing
-        # produces the same generic AccessDeniedException.
+        # dev instance via SSM. Two SEPARATE statements are required, not
+        # one with both ARNs — a tag condition applies to every resource in
+        # a statement, and AWS-RunShellScript (below) is an AWS-owned
+        # document with no tags at all, so a single combined statement can
+        # never be satisfied for it. Found the hard way: CI failed with
+        # AccessDenied specifically on the document ARN even though the
+        # instance-side condition was correct.
         #
         # Scoped by the instance's own Environment=dev tag rather than a
         # hardcoded instance ID, so this survives the instance being
         # replaced (e.g. after a bootstrap fix, see the 2026-08-27
         # incident) without an IAM edit.
-        Sid    = "SendCommandToAirflowDev"
+        Sid    = "SendCommandToAirflowDevInstance"
         Effect = "Allow"
         Action = ["ssm:SendCommand"]
         Resource = [
           "arn:aws:ec2:${var.region}:${var.account_id}:instance/*",
-          "arn:aws:ssm:${var.region}::document/AWS-RunShellScript",
         ]
         Condition = {
           StringEquals = {
             "ssm:resourceTag/Environment" = "dev"
           }
         }
+      },
+      {
+        # The document itself is an AWS-owned, publicly available runbook —
+        # it has no tags to condition on. Restricting WHICH INSTANCE can be
+        # commanded (above) is what actually limits blast radius here, not
+        # restricting which document runs.
+        Sid      = "SendCommandToAirflowDevDocument"
+        Effect   = "Allow"
+        Action   = ["ssm:SendCommand"]
+        Resource = "arn:aws:ssm:${var.region}::document/AWS-RunShellScript"
       },
       {
         # GetCommandInvocation/ListCommandInvocations do not support
@@ -509,19 +522,25 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
         }
       },
       {
-        # Same reasoning as SendCommandToAirflowDev, scoped to Environment=prod.
-        Sid    = "SendCommandToAirflowProd"
+        # Same reasoning as SendCommandToAirflowDevInstance, scoped to
+        # Environment=prod.
+        Sid    = "SendCommandToAirflowProdInstance"
         Effect = "Allow"
         Action = ["ssm:SendCommand"]
         Resource = [
           "arn:aws:ec2:${var.region}:${var.account_id}:instance/*",
-          "arn:aws:ssm:${var.region}::document/AWS-RunShellScript",
         ]
         Condition = {
           StringEquals = {
             "ssm:resourceTag/Environment" = "prod"
           }
         }
+      },
+      {
+        Sid      = "SendCommandToAirflowProdDocument"
+        Effect   = "Allow"
+        Action   = ["ssm:SendCommand"]
+        Resource = "arn:aws:ssm:${var.region}::document/AWS-RunShellScript"
       },
       {
         Sid      = "ReadCommandResultProd"
