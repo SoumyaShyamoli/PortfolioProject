@@ -358,6 +358,23 @@ resource "aws_iam_role_policy" "dev_cicd_deploy" {
           }
         }
       },
+      {
+        Sid    = "WriteAirflowDagsDev"
+        Effect = "Allow"
+        Action = ["s3:PutObject", "s3:DeleteObject"]
+        Resource = [
+          "arn:aws:s3:::sd-retail-dev-staged-009073574996-eu-west-2-an/_airflow-dags/*",
+        ]
+      },
+      {
+        Sid      = "ListAirflowDagsDev"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = "arn:aws:s3:::sd-retail-dev-staged-009073574996-eu-west-2-an"
+        Condition = {
+          StringLike = { "s3:prefix" = ["_airflow-dags/*"] }
+        }
+      },
     ]
   })
 }
@@ -439,6 +456,23 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
           StringEquals = {
             "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
           }
+        }
+      },
+      {
+        Sid    = "WriteAirflowDagsProd"
+        Effect = "Allow"
+        Action = ["s3:PutObject", "s3:DeleteObject"]
+        Resource = [
+          "arn:aws:s3:::sd-retail-prod-staged-009073574996-eu-west-2-an/_airflow-dags/*",
+        ]
+      },
+      {
+        Sid      = "ListAirflowDagsProd"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = "arn:aws:s3:::sd-retail-prod-staged-009073574996-eu-west-2-an"
+        Condition = {
+          StringLike = { "s3:prefix" = ["_airflow-dags/*"] }
         }
       },
     ]
