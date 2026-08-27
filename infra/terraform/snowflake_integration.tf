@@ -17,13 +17,13 @@ locals {
   snowflake_integrations = {
     dev = {
       staged_bucket = local.buckets["dev-staged"].name
-      raw_bucket    = local.buckets["dev-raw"].name 
+      raw_bucket    = local.buckets["dev-raw"].name
       role_name     = "retail-dev-snowflake-integration-role"
       external_id   = var.snowflake_external_id_dev
     }
     prod = {
       staged_bucket = local.buckets["prod-staged"].name
-      raw_bucket    = local.buckets["prod-raw"].name 
+      raw_bucket    = local.buckets["prod-raw"].name
       role_name     = "retail-prod-snowflake-integration-role"
       external_id   = var.snowflake_external_id_prod
     }

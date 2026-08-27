@@ -12,8 +12,8 @@ variable "airflow_instance_state" {
     survive a stop. Default is "stopped" so a fresh `terraform apply` does
     not accidentally start (and start billing) an instance nobody asked for.
   EOT
-  type    = string
-  default = "running"
+  type        = string
+  default     = "running"
 
   validation {
     condition     = contains(["running", "stopped"], var.airflow_instance_state)

@@ -9,14 +9,14 @@ terraform {
   }
 
 
-  
-   backend "s3" {
-     bucket       = "sd-retail-tfstate-009073574996-eu-west-2-an"
-     key          = "platform/terraform.tfstate"
-     region       = "eu-west-2"
-     encrypt      = true
-     use_lockfile = true   # native S3 locking — no DynamoDB table needed
-   }
+
+  backend "s3" {
+    bucket       = "sd-retail-tfstate-009073574996-eu-west-2-an"
+    key          = "platform/terraform.tfstate"
+    region       = "eu-west-2"
+    encrypt      = true
+    use_lockfile = true # native S3 locking — no DynamoDB table needed
+  }
 }
 
 provider "aws" {
