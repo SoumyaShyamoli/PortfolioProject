@@ -329,7 +329,7 @@ resource "aws_iam_role_policy" "dev_cicd_deploy" {
         Resource  = aws_iam_role.dev_pipeline_exec.arn
         Condition = { StringEquals = { "iam:PassedToService" = "glue.amazonaws.com" } }
       },
-            {
+      {
         # Fetch the Snowflake key at runtime. Scoped to the dev path only —
         # this role cannot read /retail/prod/*, which is what keeps the
         # environment separation real rather than conventional.
@@ -374,6 +374,39 @@ resource "aws_iam_role_policy" "dev_cicd_deploy" {
         Condition = {
           StringLike = { "s3:prefix" = ["_airflow-dags/*"] }
         }
+      },
+      {
+        # Lets the deploy workflow push a synced DAG file onto the running
+        # dev instance via SSM. Both resource ARNs are required — the
+        # target instance AND the document being run — either one missing
+        # produces the same generic AccessDeniedException.
+        #
+        # Scoped by the instance's own Environment=dev tag rather than a
+        # hardcoded instance ID, so this survives the instance being
+        # replaced (e.g. after a bootstrap fix, see the 2026-08-27
+        # incident) without an IAM edit.
+        Sid    = "SendCommandToAirflowDev"
+        Effect = "Allow"
+        Action = ["ssm:SendCommand"]
+        Resource = [
+          "arn:aws:ec2:${var.region}:${var.account_id}:instance/*",
+          "arn:aws:ssm:${var.region}::document/AWS-RunShellScript",
+        ]
+        Condition = {
+          StringEquals = {
+            "ssm:resourceTag/Environment" = "dev"
+          }
+        }
+      },
+      {
+        # GetCommandInvocation/ListCommandInvocations do not support
+        # resource-level restriction (AWS has no ARN format narrower than
+        # "*" for these two actions) — this is the correct, most-scoped
+        # form available, not an oversight.
+        Sid      = "ReadCommandResultDev"
+        Effect   = "Allow"
+        Action   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
+        Resource = "*"
       },
     ]
   })
@@ -429,9 +462,9 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
         Resource  = aws_iam_role.prod_pipeline_exec.arn
         Condition = { StringEquals = { "iam:PassedToService" = "glue.amazonaws.com" } }
       },
-            {
-        # Fetch the Snowflake key at runtime. Scoped to the dev path only —
-        # this role cannot read /retail/prod/*, which is what keeps the
+      {
+        # Fetch the Snowflake key at runtime. Scoped to the prod path only —
+        # this role cannot read /retail/dev/*, which is what keeps the
         # environment separation real rather than conventional.
         Sid    = "ReadProdSecrets"
         Effect = "Allow"
@@ -474,6 +507,27 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
         Condition = {
           StringLike = { "s3:prefix" = ["_airflow-dags/*"] }
         }
+      },
+      {
+        # Same reasoning as SendCommandToAirflowDev, scoped to Environment=prod.
+        Sid    = "SendCommandToAirflowProd"
+        Effect = "Allow"
+        Action = ["ssm:SendCommand"]
+        Resource = [
+          "arn:aws:ec2:${var.region}:${var.account_id}:instance/*",
+          "arn:aws:ssm:${var.region}::document/AWS-RunShellScript",
+        ]
+        Condition = {
+          StringEquals = {
+            "ssm:resourceTag/Environment" = "prod"
+          }
+        }
+      },
+      {
+        Sid      = "ReadCommandResultProd"
+        Effect   = "Allow"
+        Action   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
+        Resource = "*"
       },
     ]
   })
