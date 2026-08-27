@@ -1,5 +1,5 @@
 """
-Retail platform pipeline DAG.
+Retail platform pipeline DAG..
 
 The environment (dev or prod) is read from RETAIL_ENVIRONMENT, set as an
 environment variable on the instance's systemd unit. Same DAG file runs
