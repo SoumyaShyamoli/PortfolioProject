@@ -26,7 +26,7 @@ variable "enable_ssm_endpoints" {
     stateful.
   EOT
   type        = bool
-  default     = true
+  default     = false
 }
 
 locals {

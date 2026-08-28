@@ -31,7 +31,7 @@ locals {
 
   tfstate_bucket = "sd-retail-tfstate-009073574996-eu-west-2-an"
   tfstate_key    = "platform/terraform.tfstate"
-  ssm_key_path   = "/retail"
+  ssm_key_path = "/retail"
 
   # Must match local.glue_script_key in glue.tf. The deploy roles need write
   # access to exactly this prefix — an earlier version granted "scripts/*"
@@ -546,6 +546,20 @@ resource "aws_iam_role_policy" "prod_cicd_deploy" {
         Sid      = "ReadCommandResultProd"
         Effect   = "Allow"
         Action   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
+        Resource = "*"
+      },
+
+      {
+        # Needed to resolve the running instance's ID by tag before sending
+        # the SSM command. Read-only, describe-only — this does not grant
+        # any control over instances, only visibility into their metadata.
+        # Unlike dev (which has the broader ReadOnlyAccess policy attached),
+        # prod gets exactly this one action, scoped to nothing narrower
+        # than account-wide since DescribeInstances does not support
+        # resource-level restriction.
+        Sid      = "DescribeAirflowInstancesProd"
+        Effect   = "Allow"
+        Action   = ["ec2:DescribeInstances"]
         Resource = "*"
       },
     ]
