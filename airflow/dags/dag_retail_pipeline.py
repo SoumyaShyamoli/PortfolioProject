@@ -5,7 +5,7 @@ The environment (dev or prod) is read from RETAIL_ENVIRONMENT, set as an
 environment variable on the instance's systemd unit. Same DAG file runs
 identically on both instances — this is the same "only the target differs"
 principle used throughout the platform (dbt profiles, Snowflake roles,
-Terraform locals).
+Terraform locals)
 
 Structure:
 
