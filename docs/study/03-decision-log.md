@@ -23,7 +23,7 @@ the way it does — the ADRs give the polished argument, this gives the path.
 
 - **EMR was in, then swapped for Redshift's slot, then dropped entirely.**
   Final position: Glue, with the Snowflake-vs-Redshift comparison deferred to
-  a standalone write-up.
+  a standalone write-up
 - **DuckDB-first was planned, then abandoned.** Original plan was to build dbt
   models against DuckDB for free and port to Snowflake at the end. Dropped in
   favour of building directly against Snowflake inside one 30-day trial

@@ -8,7 +8,7 @@ Find the `user_data = templatefile(...)` block and add one line:
   user_data = templatefile("${path.module}/../../scripts/airflow_bootstrap.sh.tpl", {
     environment      = each.key
     aws_region       = var.region
-    s3_staged_bucket = local.buckets["${each.key}-staged"].name   # ADD THIS LINE
+    s3_staged_bucket = local.buckets["${each.key}-staged"].name  # ADD THIS LINE
   })
 ```
 
