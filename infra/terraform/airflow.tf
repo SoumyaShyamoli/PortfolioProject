@@ -159,6 +159,24 @@ resource "aws_iam_role_policy" "airflow" {
           "arn:aws:s3:::${local.buckets["${each.key}-staged"].name}/_wheelhouse/*",
         ]
       },
+      {
+        # Read the DAG files the deploy workflow uploads to S3
+        # (airflow-deploy.yml). Without this, `aws s3 sync` running ON THE
+        # INSTANCE via SSM fails with AccessDenied on every object — but the
+        # overall SSM command can still report Success, because
+        # AWS-RunShellScript does not stop on a failed line mid-script by
+        # default (the `chown` on an unchanged, possibly-empty directory
+        # still exits 0). The workflow showed "DAG sync succeeded." while
+        # nothing actually landed on disk. Found 2026-08-28 — the instance
+        # role had never been granted access to this prefix at all.
+        Sid    = "ReadOwnAirflowDags"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:ListBucket"]
+        Resource = [
+          "arn:aws:s3:::${local.buckets["${each.key}-staged"].name}",
+          "arn:aws:s3:::${local.buckets["${each.key}-staged"].name}/_airflow-dags/*",
+        ]
+      },
     ]
   })
 }
@@ -176,6 +194,11 @@ resource "aws_iam_instance_profile" "airflow" {
 # this resource block, FAILS loudly instead of silently terminating the
 # instance. The guard must be deliberately removed first. This exists
 # because "pause" here means STOP, never destroy — see the runbook.
+#
+# NOTE: prevent_destroy is currently FALSE, left that way from the last
+# -replace operation (2026-08-27, bootstrap script fixes). Flip back to
+# TRUE once this IAM fix is applied and confirmed working — do not leave
+# it off longer than necessary.
 
 resource "aws_instance" "airflow" {
   for_each = local.airflow_environments
@@ -209,7 +232,7 @@ resource "aws_instance" "airflow" {
   }
 
   lifecycle {
-    prevent_destroy = false
+    prevent_destroy = false # TODO: flip back to true after this fix is confirmed
     # user_data changes do not force replacement — see the note above about
     # it only running on first boot. Changing it will not retroactively
     # apply; that requires a manual re-run or a fresh instance.
