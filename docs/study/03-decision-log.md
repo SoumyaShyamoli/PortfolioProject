@@ -27,7 +27,7 @@ the way it does — the ADRs give the polished argument, this gives the path.
 - **DuckDB-first was planned, then abandoned.** Original plan was to build dbt
   models against DuckDB for free and port to Snowflake at the end. Dropped in
   favour of building directly against Snowflake inside one 30-day trial
-  window, with all AWS-side work completed before starting that clock..
+  window, with all AWS-side work completed before starting that clock.
 
 ---
 

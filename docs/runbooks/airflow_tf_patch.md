@@ -9,7 +9,7 @@ Find the `user_data = templatefile(...)` block and add one line:
     environment      = each.key
     aws_region       = var.region
     s3_staged_bucket = local.buckets["${each.key}-staged"].name  # ADD THIS LINE
-  }).
+  })
 ```
 
 ## 2. Grant read on the wheelhouse prefix

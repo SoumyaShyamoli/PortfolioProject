@@ -23,7 +23,7 @@ retention for raw versus curated falls out naturally rather than needing
 per-prefix filters.
 
 The cost is six resources to manage instead of one, which Terraform makes
-irrelevant.
+irrelevant
 
 ### Q1.2 — Walk me through what lives in each layer.
 

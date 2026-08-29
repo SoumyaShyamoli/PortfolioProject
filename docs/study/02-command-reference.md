@@ -22,7 +22,7 @@ aws sts get-caller-identity --profile retail-dev
 ```
 Which identity am I actually using? Returns the account ID and the role or
 user ARN. The first thing to run when a permissions error looks wrong — it's
-often the wrong profile rather than the wrong policy.
+often the wrong profile rather than the wrong policy
 
 ```bash
 aws configure get region --profile retail-dev

@@ -123,7 +123,7 @@ use.
   per ADR 0010, not into Airflow's config file directly.
 - If a second, independent DAG is ever added (e.g. for the streaming path),
   revisit SequentialExecutor — running two unrelated DAGs would serialise
-  them even though they do not depend on each other.
+  them even though they do not depend on each other
 
 
 
