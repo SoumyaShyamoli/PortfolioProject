@@ -11,7 +11,7 @@ does not: permission boundaries, MFA enforcement, access-key rotation,
 S3 bucket policies, KMS encryption, Snowflake network policies,
 snapshots/SCD2, local-conversion checksums, and — separately — the
 category of `tfsec` findings this project's Terraform will legitimately
-trigger once static analysis runs in CI
+trigger once static analysis runs in CI.
 
 The instinct after a review like that is to build everything flagged.
 That's the wrong instinct here. Some of these gaps are real risk on a

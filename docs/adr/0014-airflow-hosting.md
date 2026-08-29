@@ -148,7 +148,7 @@ root-owned before being written to as the `airflow` user — rather than as
 a silent no-op, which is the only reason it was caught before it mattered.
 Had ownership happened to be correct, the executor and database settings
 would never have taken effect and Airflow would have fallen back to
-whatever its own defaults are, with no error at all
+whatever its own defaults are, with no error at all.
 
 **Fix:** configuration is set via `AIRFLOW__SECTION__KEY` environment
 variables directly in both systemd unit files — Airflow's actual,

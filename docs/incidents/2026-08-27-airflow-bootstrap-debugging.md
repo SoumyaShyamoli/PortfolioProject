@@ -13,7 +13,7 @@ correctly. None of the five failures were visible from the design on
 paper. Each was only found by watching a real instance fail in a real,
 network-restricted environment. This is a record of what went wrong, in
 the order it was found, because the *shape* of the debugging is more
-instructive than any single fix
+instructive than any single fix.
 
 ## Failure 1 — the log lied
 

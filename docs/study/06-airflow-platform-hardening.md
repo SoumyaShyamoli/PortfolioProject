@@ -13,7 +13,7 @@ wrong turns.
 
 **Decision:** two jobs, not one. `compile` runs on every PR (parses, no
 warehouse writes). `build` runs only on merge to `main` (actually runs
-models and tests against dev)
+models and tests against dev).
 
 ```bash
 dbt deps

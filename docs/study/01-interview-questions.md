@@ -25,7 +25,7 @@ per-prefix filters.
 The cost is six resources to manage instead of one, which Terraform makes
 irrelevant.
 
-### Q1.2 — Walk me through what lives in each layer
+### Q1.2 — Walk me through what lives in each layer.
 
 - **raw** — NDJSON, partitioned `event_date=YYYY-MM-DD`, exactly as it
   arrived. Cancellations, negative quantities, null customer IDs and

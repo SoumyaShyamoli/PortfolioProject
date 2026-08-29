@@ -1,7 +1,7 @@
 # Runbook — Migrating Terraform state to an S3 backend
 
 Written after incident 001, where this procedure went wrong. Every
-verification step below exists because its absence caused a real problem.
+verification step below exists because its absence caused a real problem..
 
 **Read the whole runbook before starting.**
 

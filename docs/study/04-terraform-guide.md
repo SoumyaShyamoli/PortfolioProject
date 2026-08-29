@@ -23,7 +23,7 @@ them up:
 **The critical insight:** state is not a cache. It is the authoritative
 record of which real resource corresponds to which config block. Lose it and
 Terraform doesn't know your infrastructure exists — it will try to create
-everything again. That is exactly what happened in incident 001
+everything again. That is exactly what happened in incident 001.
 
 ---
 

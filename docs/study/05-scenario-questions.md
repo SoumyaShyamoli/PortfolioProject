@@ -7,7 +7,7 @@ you know what *not* to do.
 **A pattern that works for most of these:** state what you'd check before
 acting, name the risk of the obvious move, then give your answer.
 
-Try answering aloud before reading on
+Try answering aloud before reading on.
 
 ---
 

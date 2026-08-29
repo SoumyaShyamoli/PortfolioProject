@@ -185,7 +185,7 @@ pip fetches it over HTTP to read the pins, and that fetch happens
 regardless of `--no-index`. The instance has no route to
 `raw.githubusercontent.com` any more than it has one to `pypi.org`
 (ADR 0003) — this was the same underlying network boundary, hit a second
-time via a URL that didn't look like a package source
+time via a URL that didn't look like a package source.
 
 **Fix:** the constraints file is downloaded once, during the wheelhouse
 build (where there is internet), saved as `constraints.txt`, and shipped
