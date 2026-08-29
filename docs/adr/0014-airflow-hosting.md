@@ -123,4 +123,44 @@ use.
   per ADR 0010, not into Airflow's config file directly.
 - If a second, independent DAG is ever added (e.g. for the streaming path),
   revisit SequentialExecutor — running two unrelated DAGs would serialise
-  them even though they do not depend on each other.
+  them even though they do not depend on each other
+
+
+
+
+
+
+---
+
+## Amendment (2026-08-27)
+
+The design in the original decision — SequentialExecutor + SQLite,
+configured on the systemd units — was correct. One implementation detail
+was not: the bootstrap script wrote configuration to
+`/opt/airflow/airflow.cfg.d/executor.cfg`, on the assumption Airflow scans
+a directory of config fragments. It does not; there is no such mechanism
+in Airflow. This is a carryover habit from tools that do work that way
+(nginx's `conf.d`, systemd's `.d` override directories) applied to a tool
+that doesn't.
+
+It surfaced as `tee: ... Permission denied` — the directory was created
+root-owned before being written to as the `airflow` user — rather than as
+a silent no-op, which is the only reason it was caught before it mattered.
+Had ownership happened to be correct, the executor and database settings
+would never have taken effect and Airflow would have fallen back to
+whatever its own defaults are, with no error at all.
+
+**Fix:** configuration is set via `AIRFLOW__SECTION__KEY` environment
+variables directly in both systemd unit files — Airflow's actual,
+documented override mechanism, and consistent with how `AIRFLOW_HOME` and
+`RETAIL_ENVIRONMENT` were already being set on those same units.
+
+```ini
+Environment=AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+Environment=AIRFLOW__CORE__LOAD_EXAMPLES=False
+Environment=AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+Environment=AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+```
+
+See ADR 0015's amendment for two further, unrelated issues hit while
+getting this design running for the first time.

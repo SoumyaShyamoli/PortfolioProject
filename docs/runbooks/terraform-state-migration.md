@@ -1,7 +1,7 @@
 # Runbook — Migrating Terraform state to an S3 backend
 
 Written after incident 001, where this procedure went wrong. Every
-verification step below exists because its absence caused a real problem.
+verification step below exists because its absence caused a real problem..
 
 **Read the whole runbook before starting.**
 
@@ -13,7 +13,7 @@ verification step below exists because its absence caused a real problem.
   that does not match reality — you will not be able to tell afterwards
   whether a diff came from the migration or was already there.
 - You have the AWS profile that can write to the state bucket.
-- Nobody else is applying against this configuration.
+- Nobody else is applying against this configuration
 
 ---
 
