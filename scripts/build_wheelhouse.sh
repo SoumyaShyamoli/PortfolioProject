@@ -22,11 +22,11 @@
 #      if nothing on that command line asked for it.
 #   3. dbt / Snowflake / boto3 — a separate ecosystem, no shared
 #      constraints file. Mixing it into passes 1-2 previously produced an
-#      unrelated dependency conflict.
+#      unrelated dependency conflict
 #
 # PLUS one manual fetch: the wheel dbt-core-experimental-parser's build
 # backend otherwise tries (and fails, offline) to pull directly from
-# GitHub. See the header comment on that section below.
+# GitHub See the header comment on that section below
 
 set -euo pipefail
 

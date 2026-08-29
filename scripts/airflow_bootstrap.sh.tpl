@@ -5,8 +5,8 @@
 # Re-running manually is idempotent (safe to repeat) after a fix.
 #
 # Installs Airflow with SequentialExecutor + SQLite. See ADR 0014: this
-# pipeline is one linear DAG, so paying for parallelism (in memory, on a
-# t3.small) that is never used is the wrong trade.
+# pipeline is one linear DAG, so paying for parallelism (in memory on a
+# t3.small) that is never used is the wrong trade
 #
 # LOGGING: a plain `exec > file 2>&1` redirect, not
 # `exec > >(tee file) 2>&1` — the latter's process substitution created a

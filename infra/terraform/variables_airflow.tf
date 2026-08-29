@@ -13,7 +13,7 @@ variable "airflow_instance_state" {
     not accidentally start (and start billing) an instance nobody asked for.
   EOT
   type        = string
-  default     = "stopped"
+  default     = "running"
 
   validation {
     condition     = contains(["running", "stopped"], var.airflow_instance_state)
