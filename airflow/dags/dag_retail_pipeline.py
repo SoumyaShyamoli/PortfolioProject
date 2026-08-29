@@ -25,7 +25,7 @@ recon_gate is the control asked for explicitly: marts must not be built on
 top of data that has not reconciled. Airflow's default trigger rule means a
 task only runs if ALL of its upstream dependencies succeeded, so a failed
 recon_gate stops dbt_run_marts from ever starting — not "marts run and we
-find out afterwards."
+find out afterwards"
 
 send_status_email has trigger_rule="all_done", so it runs regardless of
 where the DAG failed, and renders the reconciliation table from whatever
