@@ -1,0 +1,123 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: >
+      Calendar spine covering the dataset's span. Generated, not sourced
+      — supports time-intelligence joins from the facts.
+    columns:
+      - name: date_day
+        tests: [unique, not_null]
+
+  - name: dim_customer
+    description: >
+      One row per customer. Built from fct_order_lines so every metric
+      is dedup-correct by construction. Includes an RFM segmentation
+      measured against the dataset's own timeline, not the current date.
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: total_orders
+        tests: [not_null]
+      - name: total_revenue
+        tests: [not_null]
+      - name: cancellation_rate
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+      - name: customer_segment
+        tests:
+          - accepted_values:
+              values: ['high_value', 'mid_value', 'low_value']
+
+  - name: dim_product
+    description: >
+      One row per stock_code. Description picked as the most frequent
+      variant seen for that code; avg_unit_price is a genuine average,
+      not a single "the" price, since prices vary across the dataset's
+      span for the same product.
+    columns:
+      - name: stock_code
+        tests: [unique, not_null]
+      - name: description
+        description: >
+          Null for a small number of stock_codes (~56) that represent
+          non-product line items in the source — postage, adjustments,
+          manual charges — rather than missing data for real products.
+      - name: avg_unit_price
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: dim_country
+    description: >
+      One row per retail country, left-joined to World Bank enrichment.
+      Unmappable countries still get a row with null enrichment columns
+      rather than disappearing from the dimension.
+    columns:
+      - name: retail_country
+        tests: [unique, not_null]
+      - name: mapping_type
+        tests:
+          - accepted_values:
+              values: ['exact', 'alias', 'assumed', 'unmappable']
+
+  - name: fct_order_lines
+    description: >
+      One row per genuine (deduplicated) order line. THE dedup happens
+      here — duplicate_occurrence = 1 — and nowhere else in marts.
+    columns:
+      - name: invoice_no
+        tests: [not_null]
+      - name: stock_code
+        tests: [not_null]
+      - name: line_amount
+        tests: [not_null]
+      - name: customer_id
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+              config:
+                where: "customer_id is not null"
+      - name: country
+        tests:
+          - relationships:
+              to: ref('dim_country')
+              field: retail_country
+
+    # assert_marts_dedup_reconciles.sql and assert_marts_revenue_reconciles.sql
+    # (dbt/tests/) also test this model, kept as standalone singular tests
+    # rather than column-level tests since they compare against a
+    # DIFFERENT model (stg_orders), not just this one in isolation.
+
+  - name: fct_orders
+    description: >
+      One row per invoice. is_cancelled_order aggregates
+      fct_order_lines' is_cancellation via BOOLOR_AGG, verified consistent
+      per invoice by assert_cancellation_flag_consistent_per_invoice.
+    columns:
+      - name: invoice_no
+        tests: [unique, not_null]
+      - name: line_item_count
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+
+  - name: fct_revenue_monthly
+    description: >
+      One row per period x country — the business-facing rollup.
+      Cancelled orders shown separately from gross revenue, never
+      netted silently.
+    columns:
+      - name: total_revenue
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - period
+            - country
+      - dbt_utils.accepted_range:
+          column_name: total_revenue
+          min_value: 0
