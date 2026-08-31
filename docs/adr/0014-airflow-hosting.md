@@ -242,3 +242,59 @@ to fetch — and a workflow reporting green only proves the outermost
 layer succeeded, not that every command inside the script did. Gap 5
 specifically is the one worth remembering: an SSM command's own success
 status is not proof that everything it ran actually worked.
+
+
+
+---
+
+## Amendment (2026-08-31) — SMTP alerting scoped out
+
+The follow-up from the original decision — "decide an SMTP configuration
+for `EmailOperator`" — is closed by **not implementing it**, deliberately,
+rather than left open by default.
+
+**What was actually tried:** a Gmail app-password relay, following the
+pattern used everywhere else for credentials (fetched from SSM at boot,
+written to a restricted-permission file, referenced via
+`EnvironmentFile=` rather than embedded in the systemd unit — the same
+principle as the Snowflake key, applied properly to a second secret).
+The mechanism was built and is sound; it was not completed because
+Google's app-password UI has changed since this pattern was last
+documented, and getting a working credential requires account-specific
+navigation that isn't reliably reproducible from written instructions
+alone.
+
+**Decision: stop here, not switch to AWS SES either.** SES was the
+documented alternative and remains a reasonable path — but it needs a
+verified sending identity, which is its own piece of setup with its own
+failure modes, for a notification channel that isn't actually load-bearing
+anywhere else in this platform. The reconciliation report this email was
+meant to deliver already exists and is already visible without it: as a
+GitHub Actions job-summary table (`dbt-ci.yml`'s `Reconciliation report`
+steps, both dev and prod) and directly queryable in Snowflake
+(`ops.fct_pipeline_reconciliation`). Email would have been a third,
+redundant surface for the same information, not new information.
+
+**What this means concretely:**
+
+- `retail_pipeline.py`'s `render_email`/`send_email` tasks remain in the
+  DAG, unmodified. `send_email` will fail every run — there is no SMTP
+  connection configured for it to use. This is expected, not a bug to
+  chase.
+- Because `send_email` has `trigger_rule="all_done"` and `cleanup_key`
+  depends on it with the same trigger rule, `send_email`'s failure does
+  not block anything else in the DAG — it is a genuinely isolated,
+  terminal failure.
+- The bootstrap script and Terraform were reverted to their pre-SMTP
+  state — no `smtp.env` file, no `EnvironmentFile=` line, no
+  `ReadOwnSmtpPassword` IAM statement. Nothing references
+  `/retail/{env}/smtp/app_password`, which does not exist in SSM.
+  Leaving the fetch in place would have meant the NEXT instance
+  relaunch fails outright (`set -euo pipefail` on an SSM parameter that
+  doesn't exist) — worth being glad this was caught before a relaunch,
+  not after.
+
+**Revisit when:** the reconciliation report needs to reach someone who
+does not have GitHub or Snowflake access — a genuinely different
+audience than exists today, not a nicer-to-have delivery mechanism for
+the same audience that already sees it.
