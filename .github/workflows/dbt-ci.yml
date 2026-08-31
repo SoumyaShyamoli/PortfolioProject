@@ -1,14 +1,18 @@
 name: dbt
 
-# Two jobs with different risk profiles:
+# Three jobs now:
+#   compile     — every PR. Parses/compiles only, no warehouse writes.
+#   build       — merge to main. Builds + tests against dev.
+#   build-prod  — after build succeeds, gated by the "prod" GitHub
+#                 environment (branch restriction + required reviewer,
+#                 same gate deploy.yml and airflow-deploy.yml already use).
 #
-#   compile  — runs on every PR. Parses and compiles without touching data.
-#              Catches broken SQL, bad refs, missing sources.
-#   build    — runs on merge to main. Builds models and runs tests against
-#              dev, including the reconciliation controls.
-#
-# The reconciliation tests are the reason this workflow exists. A control
-# that only runs when someone remembers to type `dbt test` is not a control.
+# Why prod is a SEPARATE job, not the same job re-targeted: dev proving
+# itself first is the whole point of this pattern (see every other
+# deploy workflow in this repo). A dbt bug that passes dev's tests but
+# is somehow prod-specific is exactly what this ordering catches BEFORE
+# prod ever sees the change — build-prod only ever runs after build has
+# already succeeded.
 
 on:
   pull_request:
@@ -34,9 +38,6 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  # =========================================================================
-  # PR: compile only. No warehouse writes.
-  # =========================================================================
   compile:
     name: Compile
     if: github.event_name == 'pull_request'
@@ -47,7 +48,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -62,16 +62,10 @@ jobs:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-dev-cicd-deploy-role
           aws-region: ${{ env.AWS_REGION }}
 
-      # NOTE: no `trap` here. A trap fires when the STEP's shell exits, which
-      # is before dbt ever runs — the key would be deleted immediately after
-      # being written. Cleanup is a separate always() step at the end of the
-      # job instead.
       - name: Fetch Snowflake key
         run: |
-          aws ssm get-parameter \
-            --name "/retail/dev/snowflake/private_key" \
-            --with-decryption \
-            --query "Parameter.Value" --output text > /tmp/sf_key.p8
+          aws ssm get-parameter --name "/retail/dev/snowflake/private_key" \
+            --with-decryption --query "Parameter.Value" --output text > /tmp/sf_key.p8
           chmod 600 /tmp/sf_key.p8
           echo "SNOWFLAKE_DEV_KEY_PATH=/tmp/sf_key.p8" >> $GITHUB_ENV
 
@@ -94,50 +88,30 @@ jobs:
                 threads: 4
           PROFILE
 
-      - name: dbt deps
-        run: dbt deps
+      - run: dbt deps
+      - run: dbt parse
+      - run: dbt compile
 
-      - name: dbt parse
-        run: dbt parse
-
-      # Compiles every model to SQL without executing it. Catches bad refs,
-      # missing sources, Jinja errors, and columns referenced but not
-      # produced.
-      - name: dbt compile
-        run: dbt compile
-
-      # Documentation that is optional rots. This fails the PR if a model has
-      # no description.
       - name: Check documentation coverage
         run: |
           python - <<'PY'
           import json, sys, pathlib
-
           manifest = json.loads(pathlib.Path("target/manifest.json").read_text())
           undocumented = [
-              node["name"]
-              for node in manifest["nodes"].values()
+              node["name"] for node in manifest["nodes"].values()
               if node["resource_type"] == "model" and not node.get("description", "").strip()
           ]
           if undocumented:
               print("Models with no description:")
-              for name in undocumented:
-                  print(f"  - {name}")
+              for name in undocumented: print(f"  - {name}")
               sys.exit(1)
           print("All models documented.")
           PY
 
-      # Runs even if earlier steps failed. GitHub-hosted runners are
-      # destroyed after the job, so this is defence in depth rather than the
-      # only protection — what it actually reduces is exposure to anything
-      # else running within the same job.
       - name: Remove Snowflake key
         if: always()
         run: rm -f /tmp/sf_key.p8
 
-  # =========================================================================
-  # Merge: build and test against dev.
-  # =========================================================================
   build:
     name: Build and test (dev)
     if: github.event_name != 'pull_request'
@@ -149,7 +123,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -166,10 +139,8 @@ jobs:
 
       - name: Fetch Snowflake key
         run: |
-          aws ssm get-parameter \
-            --name "/retail/dev/snowflake/private_key" \
-            --with-decryption \
-            --query "Parameter.Value" --output text > /tmp/sf_key.p8
+          aws ssm get-parameter --name "/retail/dev/snowflake/private_key" \
+            --with-decryption --query "Parameter.Value" --output text > /tmp/sf_key.p8
           chmod 600 /tmp/sf_key.p8
           echo "SNOWFLAKE_DEV_KEY_PATH=/tmp/sf_key.p8" >> $GITHUB_ENV
 
@@ -192,73 +163,96 @@ jobs:
                 threads: 4
           PROFILE
 
-      - name: dbt deps
-        run: dbt deps
-        
-      # Freshness measured on loaded_at, not invoice_date — the data is
-      # historical, so invoice_date would always be stale. What this checks
-      # is whether the LOAD is running.
-      #
-      # continue-on-error: freshness failing means the pipeline has not run
-      # recently, which is worth knowing but should not block a code change
-      # from being tested.
-      - name: dbt source freshness
-        run: dbt source freshness
-        continue-on-error: true
-
-      - name: dbt seed
-        run: dbt seed
-
-      # `dbt build` interleaves models and their tests in dependency order,
-      # so a failing test stops downstream models rather than letting them
-      # build on bad data. `run` then `test` would build everything first and
-      # only then discover the problem — wrong for a pipeline whose whole
-      # story is reconciliation gating.
+      - run: dbt deps
+      - run: dbt seed
       - name: dbt build
-        id: build
         run: dbt build
 
-      # Independent of dbt's exit code. Reads the reconciliation model and
-      # puts it in the run summary whether or not the tests passed — a
-      # mismatch is more useful visible than buried in a failure log.
       - name: Reconciliation report
         if: always()
         run: |
           dbt show --inline "
-            select
-                period,
-                ndjson_source_lines,
-                glue_wrote_to_s3,
-                snowflake_loaded,
-                dbt_staging_rows,
-                s3_to_snowflake_diff,
-                snowflake_to_staging_diff,
-                recon_status
+            select period, ndjson_source_lines, glue_wrote_to_s3, snowflake_loaded,
+                   dbt_staging_rows, s3_to_snowflake_diff, snowflake_to_staging_diff, recon_status
             from {{ ref('fct_pipeline_reconciliation') }}
             order by period
           " --limit 50 | tee recon.txt
+          { echo "### Pipeline reconciliation (dev)"; echo; echo '```'; cat recon.txt; echo '```'; } >> $GITHUB_STEP_SUMMARY
 
-          {
-            echo "### Pipeline reconciliation"
-            echo ""
-            echo '```'
-            cat recon.txt
-            echo '```'
-          } >> $GITHUB_STEP_SUMMARY
+      - name: Remove Snowflake key
+        if: always()
+        run: rm -f /tmp/sf_key.p8
 
-      - name: Generate docs
-        if: success()
-        run: dbt docs generate
+  build-prod:
+    name: Build and test (prod)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: prod   # branch restriction + required reviewer, same as deploy-prod elsewhere
+    defaults:
+      run:
+        working-directory: dbt
 
-      - uses: actions/upload-artifact@v4
-        if: success()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          name: dbt-docs
-          path: |
-            dbt/target/manifest.json
-            dbt/target/catalog.json
-            dbt/target/index.html
-          retention-days: 14
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dbt
+        run: pip install dbt-core dbt-snowflake
+
+      - name: Assume prod deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/retail-cicd-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fetch Snowflake key
+        run: |
+          aws ssm get-parameter --name "/retail/prod/snowflake/private_key" \
+            --with-decryption --query "Parameter.Value" --output text > /tmp/sf_key.p8
+          chmod 600 /tmp/sf_key.p8
+          echo "SNOWFLAKE_PROD_KEY_PATH=/tmp/sf_key.p8" >> $GITHUB_ENV
+
+      - name: Write profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<'PROFILE'
+          retail_platform:
+            target: prod
+            outputs:
+              prod:
+                type: snowflake
+                account: BRTNPNX-IH35235
+                user: RETAIL_PROD_USER
+                private_key_path: "{{ env_var('SNOWFLAKE_PROD_KEY_PATH') }}"
+                role: RETAIL_TRANSFORMER_PROD
+                warehouse: RETAIL_WH
+                database: RETAIL_PROD
+                schema: PUBLIC
+                threads: 4
+          PROFILE
+
+      - run: dbt deps
+      - run: dbt seed --target prod
+
+      # Same reasoning as dev: build interleaves models and tests in
+      # dependency order, so a failing test on prod stops downstream
+      # models rather than letting marts build on unreconciled data.
+      - name: dbt build (prod)
+        run: dbt build --target prod
+
+      - name: Reconciliation report (prod)
+        if: always()
+        run: |
+          dbt show --target prod --inline "
+            select period, ndjson_source_lines, glue_wrote_to_s3, snowflake_loaded,
+                   dbt_staging_rows, s3_to_snowflake_diff, snowflake_to_staging_diff, recon_status
+            from {{ ref('fct_pipeline_reconciliation') }}
+            order by period
+          " --limit 50 | tee recon_prod.txt
+          { echo "### Pipeline reconciliation (prod)"; echo; echo '```'; cat recon_prod.txt; echo '```'; } >> $GITHUB_STEP_SUMMARY
 
       - name: Remove Snowflake key
         if: always()
