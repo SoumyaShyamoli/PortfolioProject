@@ -198,3 +198,182 @@ LEFT JOIN RAW.WORLDBANK_COUNTRIES c
     ON c.country_id = m.worldbank_country_id
 WHERE m.mapping_type <> 'unmappable'
   AND c.country_id IS NULL;
+
+
+
+
+
+
+  =============================================================PROD=====================================================================
+
+
+  -- 06 (prod) — World Bank reference data, PROD
+--
+-- Mirrors 06_worldbank.sql PART B exactly, pointed at RETAIL_PROD. PART A
+-- (widening STORAGE_ALLOWED_LOCATIONS on RETAIL_PROD_S3_INTEGRATION) was
+-- already done for both dev and prod integrations in the original
+-- 06_worldbank.sql — confirm before running this, don't re-run PART A
+-- blindly:
+
+USE ROLE ACCOUNTADMIN;
+DESC INTEGRATION RETAIL_PROD_S3_INTEGRATION;
+-- Confirm STORAGE_ALLOWED_LOCATIONS includes:
+--   s3://sd-retail-prod-staged-.../orders/
+--   s3://sd-retail-prod-staged-.../_audit/
+--   s3://sd-retail-prod-raw-.../worldbank/
+-- If the worldbank/ entry is missing, apply PART A from 06_worldbank.sql
+-- with s/dev/prod/ before continuing.
+
+-- Also confirm the AWS-side IAM grant (snowflake_integration.tf's
+-- ReadRawWorldBank/ListRawWorldBank statements) already covers the prod
+-- raw bucket — it does, since that Terraform resource is for_each'd across
+-- both dev and prod. Nothing to change there.
+
+-- ==========================================================================
+-- Stage and tables (RETAIL_TRANSFORMER_PROD)
+-- ==========================================================================
+
+USE ROLE RETAIL_TRANSFORMER_PROD;
+USE WAREHOUSE RETAIL_WH;
+USE DATABASE RETAIL_PROD;
+
+CREATE STAGE IF NOT EXISTS RAW.STG_WORLDBANK
+  STORAGE_INTEGRATION = RETAIL_PROD_S3_INTEGRATION
+  URL                 = 's3://sd-retail-prod-raw-009073574996-eu-west-2-an/worldbank/'
+  FILE_FORMAT         = (TYPE = JSON)
+  COMMENT             = 'World Bank country metadata and indicators, NDJSON';
+
+LIST @RAW.STG_WORLDBANK;
+
+-- --------------------------------------------------------------------------
+-- Countries
+-- --------------------------------------------------------------------------
+-- Same shape as dev. Includes AGGREGATES ('World', 'Euro area', etc,
+-- region_id = 'NA') deliberately — filtered in dbt's stg_worldbank_countries,
+-- not here, per ADR 0005 (raw takes what the source returns).
+
+CREATE TABLE IF NOT EXISTS RAW.WORLDBANK_COUNTRIES (
+    country_id        VARCHAR,
+    iso2_code         VARCHAR,
+    country_name      VARCHAR,
+    region_id         VARCHAR,
+    region_name       VARCHAR,
+    admin_region_id   VARCHAR,
+    income_level_id   VARCHAR,
+    income_level_name VARCHAR,
+    lending_type_id   VARCHAR,
+    capital_city      VARCHAR,
+    longitude         VARCHAR,
+    latitude          VARCHAR,
+    source_system     VARCHAR,
+    ingested_at       TIMESTAMP_TZ,
+    source_file       VARCHAR,
+    loaded_at         TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+-- Reference data, replaced wholesale on each Lambda run — TRUNCATE + FORCE
+-- mirrors that, same reasoning as dev's version.
+TRUNCATE TABLE RAW.WORLDBANK_COUNTRIES;
+
+COPY INTO RAW.WORLDBANK_COUNTRIES (
+    country_id, iso2_code, country_name, region_id, region_name,
+    admin_region_id, income_level_id, income_level_name, lending_type_id,
+    capital_city, longitude, latitude, source_system, ingested_at, source_file
+)
+FROM (
+    SELECT
+        $1:country_id::VARCHAR,
+        $1:iso2_code::VARCHAR,
+        $1:country_name::VARCHAR,
+        $1:region_id::VARCHAR,
+        $1:region_name::VARCHAR,
+        $1:admin_region_id::VARCHAR,
+        $1:income_level_id::VARCHAR,
+        $1:income_level_name::VARCHAR,
+        $1:lending_type_id::VARCHAR,
+        $1:capital_city::VARCHAR,
+        $1:longitude::VARCHAR,
+        $1:latitude::VARCHAR,
+        $1:source_system::VARCHAR,
+        $1:ingested_at::TIMESTAMP_TZ,
+        METADATA$FILENAME
+    FROM @RAW.STG_WORLDBANK
+)
+PATTERN = '.*countries/.*[.]json'
+FILE_FORMAT = (TYPE = JSON)
+FORCE = TRUE
+ON_ERROR = 'ABORT_STATEMENT';
+
+-- --------------------------------------------------------------------------
+-- Indicators (GDP and population)
+-- --------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS RAW.WORLDBANK_INDICATORS (
+    country_id      VARCHAR,
+    country_name    VARCHAR,
+    indicator_id    VARCHAR,
+    indicator_name  VARCHAR,
+    year            VARCHAR,
+    value           FLOAT,
+    source_system   VARCHAR,
+    ingested_at     TIMESTAMP_TZ,
+    source_file     VARCHAR,
+    loaded_at       TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+TRUNCATE TABLE RAW.WORLDBANK_INDICATORS;
+
+COPY INTO RAW.WORLDBANK_INDICATORS (
+    country_id, country_name, indicator_id, indicator_name,
+    year, value, source_system, ingested_at, source_file
+)
+FROM (
+    SELECT
+        $1:country_id::VARCHAR,
+        $1:country_name::VARCHAR,
+        $1:indicator_id::VARCHAR,
+        $1:indicator_name::VARCHAR,
+        $1:year::VARCHAR,
+        $1:value::FLOAT,
+        $1:source_system::VARCHAR,
+        $1:ingested_at::TIMESTAMP_TZ,
+        METADATA$FILENAME
+    FROM @RAW.STG_WORLDBANK
+)
+PATTERN = '.*(gdp|population)/.*[.]json'
+FILE_FORMAT = (TYPE = JSON)
+FORCE = TRUE
+ON_ERROR = 'ABORT_STATEMENT';
+
+-- ==========================================================================
+-- Verify
+-- ==========================================================================
+
+SELECT
+    COUNT(*)                                              AS total_rows,
+    COUNT_IF(region_id = 'NA')                            AS aggregates,
+    COUNT_IF(region_id <> 'NA' OR region_id IS NULL)      AS actual_countries
+FROM RAW.WORLDBANK_COUNTRIES;
+
+SELECT
+    indicator_id,
+    year,
+    COUNT(*)                AS rows,
+    COUNT(value)             AS non_null_values,
+    COUNT(*) - COUNT(value)  AS null_values
+FROM RAW.WORLDBANK_INDICATORS
+GROUP BY 1, 2
+ORDER BY 1;
+
+-- Country-mapping-to-World-Bank join check, same as dev's version. Should
+-- return zero rows.
+SELECT
+    m.retail_country,
+    m.worldbank_country_id,
+    m.mapping_type,
+    c.country_name AS worldbank_name
+FROM STAGING.COUNTRY_MAPPING m
+LEFT JOIN RAW.WORLDBANK_COUNTRIES c
+    ON c.country_id = m.worldbank_country_id
+WHERE m.mapping_type <> 'unmappable'
+  AND c.country_id IS NULL;

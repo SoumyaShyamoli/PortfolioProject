@@ -1,0 +1,44 @@
+retail_country,worldbank_country_id,mapping_type,note
+United Kingdom,GBR,exact,
+EIRE,IRL,alias,EIRE is the Irish-language name for Ireland
+Germany,DEU,exact,
+France,FRA,exact,
+Netherlands,NLD,exact,
+Spain,ESP,exact,
+Switzerland,CHE,exact,
+Belgium,BEL,exact,
+Portugal,PRT,exact,
+Australia,AUS,exact,
+Channel Islands,CHI,exact,World Bank carries Channel Islands as a distinct entity
+Italy,ITA,exact,
+Norway,NOR,exact,
+Sweden,SWE,exact,
+Cyprus,CYP,exact,
+Finland,FIN,exact,
+Austria,AUT,exact,
+Denmark,DNK,exact,
+Greece,GRC,exact,
+Japan,JPN,exact,
+USA,USA,alias,Abbreviation of United States
+Poland,POL,exact,
+United Arab Emirates,ARE,exact,
+Israel,ISR,exact,
+Hong Kong,HKG,alias,World Bank name is Hong Kong SAR China
+Singapore,SGP,exact,
+Malta,MLT,exact,
+Iceland,ISL,exact,
+Canada,CAN,exact,
+Lithuania,LTU,exact,
+RSA,ZAF,alias,Republic of South Africa
+Bahrain,BHR,exact,
+Brazil,BRA,exact,
+Thailand,THA,exact,
+Korea,KOR,assumed,Ambiguous between Republic of Korea and DPRK; assumed South Korea on commercial plausibility
+Lebanon,LBN,exact,
+West Indies,,unmappable,Historic regional term covering multiple Caribbean states; no single World Bank entity
+Bermuda,BMU,exact,
+Nigeria,NGA,exact,
+Czech Republic,CZE,alias,World Bank renamed this to Czechia
+Saudi Arabia,SAU,exact,
+European Community,,unmappable,Political aggregate rather than a country
+Unspecified,,unmappable,Placeholder in the source data
