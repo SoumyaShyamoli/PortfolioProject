@@ -5,29 +5,22 @@
 # Re-running manually is idempotent (safe to repeat) after a fix.
 #
 # Installs Airflow with SequentialExecutor + SQLite. See ADR 0014: this
-# pipeline is one linear DAG, so paying for parallelism (in memory on a
-# t3.small) that is never used is the wrong trade
+# pipeline is one linear DAG, so paying for parallelism (in memory, on a
+# t3.small) that is never used is the wrong trade.
 #
-# LOGGING: a plain `exec > file 2>&1` redirect, not
-# `exec > >(tee file) 2>&1` — the latter's process substitution created a
-# background subshell whose completion cloud-init did not reliably wait on,
-# making the script appear to finish in seconds with almost nothing
-# actually run. Confirmed on this exact AMI.
+# LOGGING: a plain `exec > file 2>&1` redirect — see ADR 0015's amendment
+# for why `exec > >(tee file) 2>&1` caused cloud-init to report success
+# before any real command had run.
 #
-# PACKAGE INSTALL — three passes, matching scripts/build_wheelhouse.sh:
+# PACKAGE INSTALL — three passes, matching scripts/build_wheelhouse.sh.
+# See ADR 0015 for the full reasoning (explicit version pinning, local
+# constraints file, the dbt-core-experimental-parser wheel).
 #
-#   1. Airflow core alone, under its constraints file.
-#   2. Airflow core AGAIN, explicitly, alongside the providers, under the
-#      SAME constraints file. The explicit re-statement of the exact
-#      version is what pins it — installing providers alone let pip treat
-#      Airflow as a free transitive dependency and pick whatever newest
-#      version satisfied the provider's own minimum, which drifted to 3.x
-#      once and to a different 2.x minor once. See ADR 0015 (amendment).
-#   3. dbt / Snowflake / boto3, unconstrained, separate ecosystem.
-#
-# All three install from the local wheelhouse only (--no-index), which
-# includes a manually-fetched wheel for dbt-core-experimental-parser — see
-# build_wheelhouse.sh for why that is needed.
+# NO SMTP configuration — deliberately. See ADR 0014's third amendment:
+# email alerting was scoped out, not deferred by accident. The DAG's
+# send_email task will fail every run until/unless this is revisited; that
+# is expected and does not block anything else (cleanup_key has
+# trigger_rule=all_done and runs regardless).
 
 set -euo pipefail
 exec > /var/log/airflow-bootstrap.log 2>&1
@@ -59,7 +52,6 @@ AIRFLOW_VERSION="2.10.5"
 PYTHON_VERSION="3.11"
 
 # --- Fetch the wheelhouse from S3, not PyPI --------------------------------
-# No route from this subnet to pypi.org at all (ADR 0003/0015).
 
 WHEELHOUSE_DIR=/opt/airflow/wheelhouse
 mkdir -p "$WHEELHOUSE_DIR"
@@ -70,13 +62,6 @@ aws s3 sync "s3://$S3_STAGED_BUCKET/_wheelhouse/" "$WHEELHOUSE_DIR" \
 echo "=== Wheelhouse synced from S3 ==="
 date -u
 
-# `--constraint <URL>` is a SEPARATE network fetch from the package
-# installs below — --no-index/--find-links only cover where pip looks for
-# PACKAGES, not this. There is no route from this subnet to
-# raw.githubusercontent.com any more than there is to pypi.org (ADR 0003).
-# The constraints file was downloaded during the wheelhouse build (where
-# there is internet) and synced here as constraints.txt alongside the
-# packages — reference that local file, never the remote URL, on this box.
 CONSTRAINT_FILE="$WHEELHOUSE_DIR/constraints.txt"
 if [ ! -f "$CONSTRAINT_FILE" ]; then
   echo "FATAL: $CONSTRAINT_FILE not found in the synced wheelhouse." >&2
@@ -87,7 +72,6 @@ sudo -u airflow /opt/airflow/venv/bin/pip install \
   --no-index --find-links "$WHEELHOUSE_DIR" \
   --upgrade pip
 
-# Pass 1 — Airflow core alone, under its constraints file.
 sudo -u airflow /opt/airflow/venv/bin/pip install \
   --no-index --find-links "$WHEELHOUSE_DIR" \
   "apache-airflow==$${AIRFLOW_VERSION}" \
@@ -96,8 +80,6 @@ sudo -u airflow /opt/airflow/venv/bin/pip install \
 echo "=== Pass 1 (Airflow core) installed ==="
 date -u
 
-# Pass 2 — Airflow core (explicit, again) + providers, same constraint.
-# The re-statement of the exact version is what pins it — see header.
 sudo -u airflow /opt/airflow/venv/bin/pip install \
   --no-index --find-links "$WHEELHOUSE_DIR" \
   "apache-airflow==$${AIRFLOW_VERSION}" \
@@ -108,7 +90,6 @@ sudo -u airflow /opt/airflow/venv/bin/pip install \
 echo "=== Pass 2 (providers, pinned to $AIRFLOW_VERSION) installed ==="
 date -u
 
-# Pass 3 — dbt / Snowflake / boto3, unconstrained.
 sudo -u airflow /opt/airflow/venv/bin/pip install \
   --no-index --find-links "$WHEELHOUSE_DIR" \
   dbt-core \
@@ -119,9 +100,6 @@ sudo -u airflow /opt/airflow/venv/bin/pip install \
 echo "=== Pass 3 (dbt/Snowflake/boto3) installed ==="
 date -u
 
-# --- Verify the version that actually landed --------------------------------
-# Non-negotiable given history: fail loudly rather than proceed to
-# systemd on a silently wrong Airflow version.
 INSTALLED_VERSION=$(/opt/airflow/venv/bin/airflow version)
 echo "Installed Airflow version: $INSTALLED_VERSION"
 if [ "$INSTALLED_VERSION" != "$AIRFLOW_VERSION" ]; then
@@ -133,13 +111,6 @@ echo "=== Python packages done, version verified: $INSTALLED_VERSION ==="
 date -u
 
 # --- Airflow configuration -------------------------------------------------
-#
-# Set via AIRFLOW__SECTION__KEY environment variables on the systemd units,
-# not an airflow.cfg.d directory — Airflow has no such directory-of-
-# fragments mechanism; that was a mistaken carryover from other tools
-# (nginx, systemd) that do work that way. Environment variables are
-# Airflow's actual, documented override mechanism and take precedence over
-# airflow.cfg without needing to edit that file at all.
 
 export AIRFLOW_HOME=/opt/airflow
 
@@ -160,6 +131,17 @@ After=network.target
 
 [Service]
 User=airflow
+# SequentialExecutor spawns task subprocesses by invoking the bare command
+# "airflow" (not a full path) — see sequential_executor.py's sync(). Without
+# PATH including the venv's bin directory, every task subprocess launch
+# fails with FileNotFoundError, the scheduler crashes, systemd restarts it
+# (silently, per Restart=on-failure below), and every queued task is
+# orphaned forever with no visible error anywhere except journalctl. Found
+# 2026-08-31 — the scheduler itself starts fine (ExecStart uses a full
+# path), only task execution inside it was broken, which is why this
+# looked like a stuck/queued-task problem rather than a PATH problem at
+# first.
+Environment=PATH=/opt/airflow/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=AIRFLOW_HOME=/opt/airflow
 Environment=RETAIL_ENVIRONMENT=$ENVIRONMENT
 Environment=AWS_DEFAULT_REGION=$AWS_REGION
@@ -182,6 +164,7 @@ After=network.target
 
 [Service]
 User=airflow
+Environment=PATH=/opt/airflow/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=AIRFLOW_HOME=/opt/airflow
 Environment=RETAIL_ENVIRONMENT=$ENVIRONMENT
 Environment=AIRFLOW__CORE__EXECUTOR=SequentialExecutor
