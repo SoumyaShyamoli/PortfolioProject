@@ -1,7 +1,7 @@
 variable "airflow_instance_type" {
   description = "EC2 instance type for Airflow. t3.small with SequentialExecutor + SQLite is deliberately undersized for a real production Airflow deployment — see ADR 0014."
   type        = string
-  default     = "t3.small"
+  default     = "t3.medium"
 }
 
 variable "airflow_instance_state" {

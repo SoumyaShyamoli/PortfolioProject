@@ -8,8 +8,10 @@
 # dev and prod Snowflake credentials, contradicting ADR 0010.
 #
 # COST: two t3.small instances, SequentialExecutor + SQLite (no separate
-# Postgres container — see the bootstrap script), running for the ~10 day
-# window this was built and demoed in, then stopped. Roughly £9-10 total.
+# Postgres container — see the bootstrap script), running for the working
+# window this was built and demoed in, then stopped. See ADR 0014's second
+# amendment for the corrected, higher cost figure (SSM endpoints, actual
+# runtime) — the original ~£9-10 estimate undercounted real spend.
 # EBS volumes keep costing a small amount monthly while stopped, until
 # terminated — see the runbook for what "pause" actually means here.
 
@@ -195,10 +197,12 @@ resource "aws_iam_instance_profile" "airflow" {
 # instance. The guard must be deliberately removed first. This exists
 # because "pause" here means STOP, never destroy — see the runbook.
 #
-# NOTE: prevent_destroy is currently FALSE, left that way from the last
-# -replace operation (2026-08-27, bootstrap script fixes). Flip back to
-# TRUE once this IAM fix is applied and confirmed working — do not leave
-# it off longer than necessary.
+# Set back to TRUE here. It was left FALSE after the 2026-08-27 bootstrap
+# fixes and again during the 2026-08-31 t3.medium attempt (which itself
+# destroyed and recreated both instances when it failed — see the incident
+# note in ADR 0014's amendments). No further -replace is planned in the
+# current verification flow, so the guard goes back on now rather than
+# staying open longer than each specific fix needs.
 
 resource "aws_instance" "airflow" {
   for_each = local.airflow_environments
@@ -212,7 +216,10 @@ resource "aws_instance" "airflow" {
   # Runs once, on first boot only. Idempotent re-runs (e.g. after a stop and
   # restart, which does NOT re-run user_data) are not needed — the box keeps
   # its disk, so Airflow, dbt and the DAG files all persist across a
-  # stop/start cycle.
+  # stop/start cycle. NOTE: both instances were recreated on 2026-08-31 (the
+  # failed t3.medium attempt destroyed the originals) — swap file and any
+  # other interactive on-box fixes from before that date do NOT carry over
+  # and need reapplying on the current instances.
   user_data = templatefile("${path.module}/../../scripts/airflow_bootstrap.sh.tpl", {
     environment      = each.key
     aws_region       = var.region
@@ -232,7 +239,7 @@ resource "aws_instance" "airflow" {
   }
 
   lifecycle {
-    prevent_destroy = false # TODO: flip back to true after this fix is confirmed
+    prevent_destroy = true
     # user_data changes do not force replacement — see the note above about
     # it only running on first boot. Changing it will not retroactively
     # apply; that requires a manual re-run or a fresh instance.
@@ -246,6 +253,13 @@ resource "aws_instance" "airflow" {
 # create or destroy the instance — aws_instance.airflow above is created
 # exactly once and every other `terraform apply` in this project, for
 # unrelated changes, leaves it untouched.
+#
+# --profile and --output are EXPLICIT here, not left to ambient shell
+# config. Without them, this command intermittently failed with
+# "Unknown output type: None" — the AWS CLI resolving to a broken output
+# format when invoked from Terraform's local-exec (a different execution
+# context than an interactive shell, where ambient config behaves
+# differently). Found 2026-08-31.
 
 resource "null_resource" "airflow_power_state" {
   for_each = local.airflow_environments
@@ -257,9 +271,9 @@ resource "null_resource" "airflow_power_state" {
 
   provisioner "local-exec" {
     command = var.airflow_instance_state == "running" ? (
-      "aws ec2 start-instances --instance-ids ${aws_instance.airflow[each.key].id} --region ${var.region}"
+      "aws ec2 start-instances --instance-ids ${aws_instance.airflow[each.key].id} --region ${var.region} --profile retail-dev --output json"
       ) : (
-      "aws ec2 stop-instances --instance-ids ${aws_instance.airflow[each.key].id} --region ${var.region}"
+      "aws ec2 stop-instances --instance-ids ${aws_instance.airflow[each.key].id} --region ${var.region} --profile retail-dev --output json"
     )
   }
 }
