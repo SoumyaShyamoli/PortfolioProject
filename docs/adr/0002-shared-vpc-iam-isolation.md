@@ -93,3 +93,40 @@ enforcing at a second layer what IAM already enforces at the first.
 - Revisit if any VPC-resident, network-reachable service is introduced.
 - Tag network resources with the environments they serve, so the sharing is
   visible in the console rather than only in this document.
+
+
+
+
+---
+
+## Amendment (2026-08-28)
+
+This ADR's own follow-up condition has fired: "revisit if any
+VPC-resident, network-reachable service is introduced." The Airflow
+instances (ADR 0014) are exactly that — two EC2 instances living in the
+shared VPC's private subnets, reachable via SSM Session Manager.
+
+**The original reasoning still holds, and here's why explicitly, rather
+than leaving the trigger silently unaddressed.** The shared-VPC decision
+rested on IAM being the real isolation boundary between dev and prod,
+not network segmentation. Airflow doesn't weaken that: each instance has
+its own IAM role (`retail-dev-airflow-role` / `retail-prod-airflow-role`),
+each scoped to its own environment's Snowflake key, its own environment's
+S3 prefixes, and nothing else — the same pattern already used for Glue's
+pipeline execution roles. The instances sit in the same VPC, but nothing
+about being in the same VPC gives one environment's instance any reach
+into the other's resources; that boundary is still enforced entirely by
+IAM, exactly as this ADR originally decided.
+
+**What's genuinely new, and worth naming:** this is the first time two
+long-running, addressable compute resources (not a transient Glue job)
+have shared this VPC. A future service with a *network-level* trust
+model — something that authenticates by source IP or VPC membership
+rather than IAM role — would be the actual case this ADR's original
+follow-up was warning about. Nothing built so far does that; SSM
+Session Manager and the S3 gateway endpoint are both IAM-authenticated,
+not network-trust-based.
+
+**Conclusion:** no change to the shared-VPC decision. The follow-up is
+closed, not because the trigger didn't fire, but because firing it and
+checking confirmed the original reasoning was sound.

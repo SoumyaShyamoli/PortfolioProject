@@ -114,7 +114,7 @@ for period in "${months[@]}"; do
         printf '.'
     done
     echo
-    sleep 10
+    sleep 30
 
     case "$state" in
         SUCCEEDED)
