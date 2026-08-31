@@ -158,3 +158,44 @@ default, not a rule. When a provider is immature for a specific resource,
 committed SQL with a documented procedure is a legitimate answer — provided
 the procedure includes a verification step, because an unverified manual
 process is where this genuinely would be worse than IaC.
+
+
+
+---
+
+## Amendment (2026-08-28)
+
+This ADR's own follow-up asked to be revisited if Snowflake-side
+configuration grew beyond the original storage integration. It has grown
+substantially since: a resource monitor, the `RETAIL_READER` role, the
+full marts layer, and World Bank raw tables in both dev and prod — all
+added as hand-run DDL under `snowflake/setup/`, none of it in Terraform
+state.
+
+**Revisited, and the answer is: no change needed.** The DDL-not-Terraform
+split has held up cleanly under that growth, for the same reason it was
+chosen originally — nothing added since has been the kind of resource
+Terraform's Snowflake provider handled poorly (storage integrations,
+specifically). Roles, warehouses, tables, and the resource monitor are
+all plain SQL, version-controlled, numbered, and run in a documented
+order — the pattern scales by adding another numbered file, not by
+adding complexity to how it's managed.
+
+**What's actually grown is the number of files, not the need for a
+different state strategy.** `snowflake/setup/` now runs `01` through
+`06` (plus a `06_worldbank_prod.sql` variant) and a `07_resource_monitor.sql`.
+The follow-up this closes out was asking "does this need Terraform or a
+separate state file" — the honest answer, confirmed by six months of
+files added without friction, is that it doesn't need either. A README
+explaining run order remains the right amount of process for this, and
+is the one piece from the original follow-ups still owed (see
+`docs/next-session-priorities.md`).
+
+**One thing worth watching, not yet a problem:** every file assumes the
+correct role/warehouse context is set manually before running (`USE
+ROLE`, `USE WAREHOUSE`, `USE DATABASE` at the top of each script). This
+has worked because there is one operator running these by hand,
+carefully, in order. It would not scale to a team running these
+concurrently or out of order — worth naming as an explicit boundary of
+this pattern's suitability, the same honest framing ADR 0013 uses for
+other solo-project-appropriate gaps.

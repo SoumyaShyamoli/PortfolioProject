@@ -121,3 +121,50 @@ how a sub-£10 budget quietly becomes a £40 bill. Create on demonstrated need.
   is missing.
 - Add a billing alarm distinct from the budget alert, since budget alerts are
   reactive and can lag a day behind the spend that triggered them.
+
+
+
+
+---
+
+## Amendment (2026-08-28)
+
+Two real consequences of the no-NAT, no-IGW decision surfaced since this
+ADR was written, both worth recording against the decision that caused
+them rather than only in the documents that had to work around them.
+
+**1. The predicted pattern happened — for a different service than
+expected.** This ADR's original follow-up anticipated possibly needing
+a Glue interface endpoint; that never materialised (Glue ran fine
+without one). What DID need an interface endpoint was **SSM** — three of
+them (`ssm`, `ssmmessages`, `ec2messages`) — once the Airflow instances
+(ADR 0014) needed to be reachable at all. Same underlying mechanism this
+ADR already established (add an interface endpoint only when a specific,
+real need appears, not preemptively), just a different service than
+originally guessed. See `ssm_endpoints.tf` — toggled by a boolean rather
+than the stop/start pattern used for the instances themselves, since
+endpoints hold no state worth preserving between uses.
+
+**2. No NAT meant no PyPI, which is the direct root cause of ADR 0015.**
+This is worth stating explicitly rather than leaving ADR 0015 to read as
+an isolated wheelhouse design with no clear origin. The chain is: no NAT
+(this ADR, cost-driven) → no route to `pypi.org` from the Airflow
+instances → `pip install` fails at bootstrap → the wheelhouse
+workaround. ADR 0015 is not an independent decision; it is a direct,
+traceable consequence of this one. Anyone asking "why does this project
+need a whole separate package-mirroring system" should be pointed here
+first, then to ADR 0015 for the mechanism.
+
+**Cost picture, updated:** the SSM endpoints add a real, non-trivial
+line — roughly £1/day while switched on, larger than the Airflow
+instances' own compute cost. This ADR's original "no NAT saves ~£30/month"
+framing undercounted what enabling *any* AWS-side network access from
+these subnets would eventually cost in aggregate (interface endpoints
+are not free, only cheaper and more scoped than a NAT gateway). Still
+the right call — £1/day only while actively debugging, versus a
+NAT gateway running continuously — but the original comparison was
+incomplete.
+
+**No change to the core decision.** No NAT gateway remains correct for
+this project's cost profile. The amendment is purely to make both
+downstream consequences traceable back to their origin.

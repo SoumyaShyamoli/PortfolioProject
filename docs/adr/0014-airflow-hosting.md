@@ -164,3 +164,81 @@ Environment=AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.d
 
 See ADR 0015's amendment for two further, unrelated issues hit while
 getting this design running for the first time.
+
+
+
+
+---
+
+## Amendment (2026-08-28) — cost correction and the IAM permission chain
+
+Two updates beyond the earlier (2026-08-27) amendment on the config
+mechanism bug.
+
+### Cost, corrected
+
+The original "~£9-10 total" estimate covered only the two EC2 instances'
+compute. Actual cost drivers, now known:
+
+- **SSM interface endpoints** (ADR 0003's amendment): ~£1/day while
+  switched on — not accounted for at all in the original estimate, and
+  larger than the instances' own compute cost per day.
+- **A failed `t3.medium` attempt**, blocked outright by an AWS account-level
+  Free Tier restriction (`InvalidParameterCombination: ... not eligible
+  for Free Tier`) — not a cost incurred, but a discovered account
+  constraint worth recording: this account currently cannot launch
+  non-free-tier-eligible instance types at all, for reasons outside this
+  project's Terraform (a billing/verification-status restriction, not an
+  IAM or SCP policy this codebase controls). `t3.small` remained the only
+  viable size as a result, independent of whether `t3.medium`'s extra
+  memory would otherwise have been worth the cost.
+- **Real runtime ran longer than the original "~10 day window"** estimate,
+  across the debugging sessions needed to get bootstrap working.
+
+**Revised estimate:** roughly £25-30 for the Airflow piece specifically,
+across the working sessions needed to build and debug it — not £9-10.
+Stated plainly, consistent with how every other cost surprise in this
+project has been handled (ADR 0003's own NAT-vs-endpoint comparison, for
+one).
+
+### The SSM permission chain — five distinct gaps, worth recording as a set
+
+Getting the DAG-deploy path (`airflow-deploy.yml`) working end to end
+required five separate IAM fixes, found one at a time by actually running
+the workflow rather than by review:
+
+1. **S3 write to `_airflow-dags/`** on the CI deploy role — had read
+   access to the wheelhouse prefix, no write access to the deploy
+   prefix at all.
+2. **`ssm:SendCommand`** needs two resource ARNs together — the target
+   instance AND the document (`AWS-RunShellScript`) — omitting either
+   produces the same generic `AccessDeniedException`.
+3. **The tag-condition trap**: combining the instance and the document
+   in one statement with an `ssm:resourceTag/Environment` condition
+   fails, because the condition applies to every resource in that
+   statement, and `AWS-RunShellScript` is an AWS-owned document with no
+   tags at all — it can never satisfy a tag condition. Fixed by splitting
+   into two statements: the tag condition on the instance only, an
+   unconditional allow on the document.
+4. **`ssm:GetCommandInvocation`/`ListCommandInvocations`** do not support
+   resource-level restriction in IAM at all — `Resource = "*"` is the
+   correct, most-scoped form available for these two actions, not an
+   oversight.
+5. **A completely separate gap on the *instance's own role*, not the CI
+   role**: `retail-{env}-airflow-role` was never granted read access to
+   `_airflow-dags/*` at all. This meant `aws s3 sync` running ON the
+   instance (via SSM) failed with `AccessDenied` on every object — but
+   the overall SSM command still reported `Success`, because
+   `AWS-RunShellScript` does not stop on a failed line mid-script by
+   default (the second command, `chown` on an empty directory, still
+   exits 0). The workflow showed "DAG sync succeeded" for several runs
+   while nothing had ever actually landed on the instance.
+
+**The lesson, worth being able to state plainly:** SSM's permission
+model requires stacking distinct actions and resource types — control
+plane (`SendCommand`), result retrieval (`GetCommandInvocation`), and,
+separately, the *target's own* read access to whatever it's being asked
+to fetch — and a workflow reporting green only proves the outermost
+layer succeeded, not that every command inside the script did. Gap 5
+specifically is the one worth remembering: an SSM command's own success
+status is not proof that everything it ran actually worked.
