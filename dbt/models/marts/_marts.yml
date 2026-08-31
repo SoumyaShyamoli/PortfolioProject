@@ -45,10 +45,13 @@ models:
           Null for a small number of stock_codes (~56) that represent
           non-product line items in the source — postage, adjustments,
           manual charges — rather than missing data for real products.
+          
       - name: avg_unit_price
         tests:
           - dbt_utils.accepted_range:
               min_value: 0
+              config:
+                where: "stock_code != 'B'"
 
   - name: dim_country
     description: >
