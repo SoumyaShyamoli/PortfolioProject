@@ -27,6 +27,9 @@ on:
       - '.github/workflows/dbt-ci.yml'
   workflow_dispatch:
 
+  schedule:
+    - cron: '0 * * * *'
+
 permissions:
   id-token: write
   contents: read

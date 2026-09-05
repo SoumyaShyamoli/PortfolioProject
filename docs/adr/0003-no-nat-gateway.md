@@ -168,3 +168,101 @@ incomplete.
 **No change to the core decision.** No NAT gateway remains correct for
 this project's cost profile. The amendment is purely to make both
 downstream consequences traceable back to their origin.
+
+
+
+---
+
+## Amendment (2026-09-05) — the third network gap, and the one that doesn't have a cheap fix
+
+Getting Airflow to actually orchestrate the pipeline end to end surfaced
+**three separate instances of the same underlying category of gap**: code
+running inside the private, NAT-less subnet reaching out to something that
+isn't reachable without an explicit route. Worth recording as a pattern,
+not three unrelated incidents.
+
+**1. SSM** — needed before Airflow could even be reached at all. Fixed
+with three interface endpoints (`ssm`, `ssmmessages`, `ec2messages`).
+Already amended above.
+
+**2. Glue** — the first time anything *inside* this subnet called
+`glue:StartJobRun` via boto3 directly, rather than from a laptop or a
+GitHub Actions runner (both outside the VPC, both with full internet
+access). Hung on `sock.connect()` for over three minutes before being
+killed — a genuine TCP-level timeout, not a permissions error. Fixed with
+a `com.amazonaws.eu-west-2.glue` interface endpoint, same toggle and
+security group as SSM's.
+
+**3. Snowflake — found, and NOT fixable the same way.** Snowflake is not
+an AWS service, so no `com.amazonaws.*` interface endpoint exists for it.
+The only AWS-native option is **AWS PrivateLink via a VPC Endpoint
+Service** Snowflake operates — `SYSTEM$GET_PRIVATELINK_CONFIG()` confirms
+this account's Snowflake *edition* supports it, but attempting to create
+the endpoint failed with `InvalidServiceName`, and
+`SHOW PARAMETERS LIKE 'ENABLE_INTERNAL_STAGES_PRIVATELINK'` confirmed why:
+**`false`** — PrivateLink is not actually provisioned for this account.
+Enabling it requires a Snowflake support case, is not self-service, and
+its turnaround is outside this project's control.
+
+## Decision
+
+**Not fixed tonight. Two real paths forward, neither of them free:**
+
+**A — open a Snowflake support case requesting PrivateLink activation**,
+providing this AWS account ID and region. Cost: $0 (PrivateLink itself
+has no separate Snowflake-side charge on most editions once enabled;
+the AWS-side VPC endpoint costs the same ~$0.01/hr/AZ as the SSM/Glue
+endpoints already accepted). Downside: turnaround time is unknown and
+not controllable from this side.
+
+**B — revisit the no-NAT-gateway decision from the original ADR 0003.**
+A NAT gateway gives the subnet a real route to the public internet,
+making Snowflake (and anything else non-AWS) reachable the ordinary way,
+at the ~£30/month cost this ADR explicitly chose to avoid. This would be
+the first time that specific tradeoff gets reopened rather than held.
+
+**Neither implemented as of this amendment.** Airflow's `load_snowflake_raw`,
+`recon_gate`, and `send_status_email` tasks — everything that opens a
+Snowflake connection from inside the instance — will continue failing
+with a connection timeout until one of these paths is taken.
+
+## What this means for "Airflow verification"
+
+The orchestration layer itself is now proven correct up to this exact
+boundary: `fetch_snowflake_key` (SSM), `trigger_glue`/`wait_for_glue`
+(Glue, post-fix) all genuinely work. The DAG's logic, the recon gate's
+design, the reconciliation queries — none of that is in question. What's
+blocked is specifically the network path from this EC2 instance to
+Snowflake's control plane, a decision (no NAT gateway) made before
+Airflow existed, that has now met its first real cost.
+
+## Consequences
+
+**This is not a code or Terraform bug to keep iterating on** — the fix,
+whichever path is taken, is either an external approval (Snowflake
+support) or a deliberate, already-well-understood cost tradeoff
+(NAT gateway). No further debugging session finds a cheaper third option
+here; PrivateLink and NAT-with-real-internet-access are the only two
+ways to give a NAT-less private subnet a route to a non-AWS public
+endpoint.
+
+**Worth naming honestly in any writeup of this project:** the no-NAT
+decision was right for everything that stayed AWS-native (S3, Glue,
+SSM — all fixable with free or cheap interface/gateway endpoints). It
+was always going to eventually meet something that wasn't AWS-native.
+Snowflake was that something. This isn't a flaw in the original
+decision; it's the boundary that decision was always going to have.
+
+## Follow-ups
+
+- Open the Snowflake support case for PrivateLink (path A), since it has
+  no cost and no downside beyond waiting — worth doing regardless of
+  whether path B is also pursued in parallel.
+- If PrivateLink approval doesn't materialize in a reasonable window,
+  revisit the NAT gateway decision explicitly, with this amendment as
+  the record of why the original £30/month avoidance stopped being
+  sufficient.
+- Once either path resolves, `dag_retail_pipeline.py`'s three
+  `snowflake.connector.connect()` call sites need the `host=` parameter
+  (PrivateLink) — or, if NAT is chosen instead, no DAG change is needed
+  at all, since the public hostname would simply become reachable.

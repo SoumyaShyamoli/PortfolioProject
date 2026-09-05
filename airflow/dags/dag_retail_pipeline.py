@@ -393,14 +393,14 @@ with DAG(
         fetch_key
         >> trigger_glue
         >> wait_for_glue
-        >> load_snowflake_raw
-        >> dbt_deps
-        >> dbt_seed
-        >> dbt_run_staging
-        >> dbt_run_ops
-        >> recon_gate
-        >> dbt_run_marts
-        >> dbt_test_marts
+        #>> load_snowflake_raw
+        #>> dbt_deps
+        #>> dbt_seed
+        #>> dbt_run_staging
+        #> dbt_run_ops
+        #>> recon_gate
+        #>> dbt_run_marts
+        #>> dbt_test_marts
     )
 
     # Email and key cleanup run after everything, regardless of outcome.

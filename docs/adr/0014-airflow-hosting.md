@@ -298,3 +298,110 @@ redundant surface for the same information, not new information.
 does not have GitHub or Snowflake access — a genuinely different
 audience than exists today, not a nicer-to-have delivery mechanism for
 the same audience that already sees it.
+
+
+
+
+---
+
+## Amendment (2026-09-05) — DAG scope reduced to what this instance can actually reach
+
+Following ADR 0003's amendment (no NAT gateway, PrivateLink unavailable
+on this Snowflake edition): every task in `retail_pipeline.py` that opens
+a connection to Snowflake — directly, or via dbt, which uses the same
+`snowflake-connector-python` library underneath — cannot run from this
+instance. Confirmed, not assumed: `load_snowflake_raw` fails with the
+identical `sock.connect()` timeout diagnosed for the DAG's own direct
+connections, and `dbt_deps` has a second, unrelated failure mode (fetching
+packages from the public internet, no AWS-native endpoint fixes that
+either).
+
+**Concretely, of the DAG's original tasks:**
+
+| Task | Runs from this instance | Why |
+|---|---|---|
+| `fetch_snowflake_key` | Yes | SSM only |
+| `trigger_glue`, `wait_for_glue` | Yes | Glue API, has its endpoint (this amendment's sibling) |
+| `load_snowflake_raw` | **No** | Snowflake, public internet |
+| `dbt_deps`, `dbt_seed`, `dbt_run_staging`, `dbt_run_ops` | **No** | Public internet / Snowflake via dbt |
+| `recon_gate` | **No** | Snowflake, direct connection |
+| `dbt_run_marts`, `dbt_test_marts` | **No** | Same |
+| `render_email`, `send_email` | N/A | Already scoped out — see the third amendment |
+
+That is the majority of the original DAG, not an edge case.
+
+## Decision
+
+**Airflow's scope is redefined to the AWS-native half of the pipeline —
+triggering and monitoring Glue — not the full source-to-marts chain.**
+The Snowflake/dbt half already has a working, internet-connected
+execution path: `dbt-ci.yml`'s `build` and `build-prod` jobs, running on
+GitHub Actions runners with unrestricted internet access, already
+perform every one of the tasks above correctly and have done so
+repeatedly this project.
+
+This is not a workaround adopted for lack of a better option — it is
+arguably the more correct division of responsibility. Airflow does not
+need to also be able to run dbt if a proven, already-working CI path
+does that reliably; duplicating it inside a network-constrained instance
+just to say "one tool does everything" would be duplicating
+functionality, not adding capability.
+
+## Consequences
+
+**`retail_pipeline.py` needs pruning to match this**, not left as a
+DAG that looks complete but is silently unreachable past its first three
+tasks. The honest shape going forward:
+
+```
+fetch_snowflake_key >> trigger_glue >> wait_for_glue
+```
+
+Everything downstream of Glue — the Snowflake load, staging, recon,
+marts — is CI's job, triggered independently (on push to `main`, per
+the existing `dbt-ci.yml` triggers) rather than chained from this DAG.
+
+**What this means for the recon gate specifically:** the gate's design
+(query `fct_pipeline_reconciliation`, block marts on mismatch) is sound
+and already proven — it runs today inside `dbt-ci.yml`'s `build`/
+`build-prod` jobs implicitly, since `dbt build` interleaves tests with
+models and a failing recon test already stops `dbt_run_marts` from
+building on bad data (ADR 0012). The gate exists; it just lives in CI
+rather than in this DAG.
+
+**What is genuinely lost:** a single, visual, one-DAG view of "source to
+marts" in the Airflow UI. What replaces it: the Glue trigger/wait in
+Airflow, immediately followed (manually today, or via a future
+DAG-to-CI trigger — see follow-ups) by the existing, working CI build.
+Two systems, one pipeline, rather than one system trying to do
+everything and silently failing on most of it.
+
+## Alternatives considered
+
+**Add a NAT gateway just to make the full DAG work as originally
+designed.** Rejected for now — see ADR 0003's amendment for the cost
+reasoning. Not ruled out permanently; if this project's scope grows to
+need Airflow-orchestrated dbt runs specifically (rather than CI-triggered
+ones), that tradeoff should be revisited on its own merits, not backed
+into as a side effect of "the DAG doesn't work otherwise."
+
+**Leave the DAG as originally written, accept most tasks fail.** Rejected
+— a DAG that is mostly red is worse than a DAG that is honestly scoped to
+what it can do. A shorter DAG that reliably succeeds end to end is a
+better artifact than a longer one that reliably fails two-thirds of the
+way through.
+
+## Follow-ups
+
+- Prune `retail_pipeline.py` to the three-task chain above; move the
+  removed task functions to a reference/comment block rather than delete
+  them outright, since the code is correct and would become relevant
+  again if a NAT gateway is ever added.
+- Consider whether Airflow's completion of `wait_for_glue` should trigger
+  `dbt-ci.yml`'s `build` job automatically (a `workflow_dispatch` API
+  call from the DAG, which — being an HTTPS call to `api.github.com` —
+  would face the exact same no-NAT problem and is therefore not free
+  either; worth its own small feasibility check before assuming it is).
+- Update the README's architecture description and any diagram to reflect
+  Airflow's actual, narrower scope, so this reads as an intentional
+  design rather than an abandoned larger plan.
