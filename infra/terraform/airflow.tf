@@ -232,6 +232,12 @@ resource "aws_instance" "airflow" {
     encrypted   = true
   }
 
+  metadata_options {
+    http_tokens                = "required"  # IMDSv2 only — blocks the SSRF-to-credential-theft pattern IMDSv1 is vulnerable to
+    http_endpoint               = "enabled"
+    http_put_response_hop_limit = 1
+  }
+
   tags = {
     Name        = "retail-${each.key}-airflow"
     Environment = each.key

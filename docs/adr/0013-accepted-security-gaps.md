@@ -209,3 +209,106 @@ distinction is the entire value of doing this exercise at all.
 - Add the cheap local-conversion integrity check (row-count + checksum
   logging) opportunistically, next time `convert_ndjson.py` is touched
   for any other reason.
+
+
+
+---
+
+## tfsec findings, triaged (2026-09-05)
+
+First real run against the full Terraform, following the process this
+ADR's own follow-up prescribed. **44 findings** (3 critical, 26 high, 11
+medium, 4 low), against 174 passed checks. Two fixed outright (see the
+Terraform diff for the session); everything else triaged below, each
+with a reason, not a blanket "accepted."
+
+**Scanner limitation, stated once here rather than per-finding:** tfsec
+was deprecated in May 2025 (merged into Trivy) and has received no new
+rules since. Any AWS resource type or attribute introduced after that
+date has zero coverage here. This triage reflects what tfsec's frozen
+ruleset can see, not a guarantee of full current coverage.
+
+### Fixed
+
+- **IMDSv2 not enforced** (Airflow instances) — real, cheap, no
+  tradeoff. Fixed with `metadata_options { http_tokens = "required" }`.
+- **SNS topics unencrypted** — real, and unlike S3's CMK question, SNS's
+  AWS-managed key is free. Fixed with `kms_master_key_id = "alias/aws/sns"`.
+
+### Already covered by existing ADR reasoning — referenced, not repeated
+
+- **`kms:Decrypt` on `Resource = "*"`** (multiple CI/instance roles) —
+  ADR 0010 already reasons through this exactly: KMS's default key has
+  no fixed ARN to scope to; the `ViaService` condition is the actual
+  constraint, not the resource wildcard.
+- **S3 buckets, no customer-managed key** — ADR 0013's own "S3 — KMS
+  encryption" section, written before this scan ran, already covers this
+  precisely: public research dataset, SSE-S3 sufficient, revisit if real
+  PII is ever loaded.
+
+### Newly accepted, with reasoning
+
+- **Security group egress to `0.0.0.0/0`** (Airflow, Glue) — egress
+  only, no inbound rule exists on either security group. This is the
+  mechanism by which HTTPS reaches AWS services, Snowflake, and PyPI at
+  all; tfsec cannot distinguish "wide open" from "wide open but
+  outbound-only, port 443 only." Confirmed both rules are already
+  restricted to port 443 — accepted as-is.
+  **Revisit if:** either security group's egress is ever widened to
+  additional ports without a specific need driving it.
+
+- **`glue:GetTable`/`GetDatabase` on `Resource = "*"`** (pipeline exec
+  roles) — Glue Catalog's resource-level ARN scoping for these specific
+  read actions is limited in practice; a database/table-level ARN
+  pattern was not confirmed to meaningfully narrow this without
+  restricting legitimate cross-table catalog reads the Glue job needs.
+  **Revisit if:** the Glue job's catalog usage narrows to a fixed,
+  known table set rather than whatever the job discovers at runtime.
+
+- **`human_admin` role, `glue:*` wildcard action** — this is the
+  explicit break-glass role (ADR 0004), assumable only via the AWS
+  account root principal, used for manual inspection and recovery. A
+  wildcard here is more defensible than it would be on any
+  automatically-assumed role, since a human is the one invoking it and
+  no automation ever exercises this path.
+  **Revisit if:** a second person ever gets access to assume this role
+  (same trigger ADR 0013 already uses for the permission-boundary gap).
+
+- **No VPC Flow Logs** — genuinely useful for investigating a real
+  incident, genuinely unbuilt. Consistent with this project's existing
+  pattern (CloudWatch alarms exist for pipeline failures, not for
+  network-level forensics) — a solo project with no live incident
+  history to investigate has limited immediate value from this, at a
+  real ongoing cost (Flow Logs bill per log delivered).
+  **Revisit if:** any unexplained network behavior needs investigating,
+  or before this platform is positioned as more than a portfolio piece.
+
+- **S3 buckets, no access logging** — same shape as Flow Logs: valuable
+  for investigating who touched what, unbuilt, real ongoing cost
+  (a second bucket to hold logs, plus the logging overhead itself).
+  **Revisit if:** the account ever needs to reconstruct exactly who
+  accessed a specific object at a specific time — this is the control
+  that would have answered that question and doesn't exist.
+
+- **4 buckets missing versioning** (curated buckets confirmed among
+  them) — raw and staged already have versioning per the original S3
+  design (ADR 0005); curated is reserved for Project 2 and currently
+  holds nothing. Accepted as a non-issue for buckets that are empty and
+  unused; **revisit before Project 2 (Databricks) starts writing to
+  curated** — versioning should be enabled before that bucket holds
+  anything real, not after.
+
+- **Lambda log group encryption, Lambda tracing** — low severity, no
+  real driver either way. These logs hold World Bank ingestion status
+  only (no customer data ever flows through this Lambda), and tracing
+  adds observability for a function that runs monthly and has never
+  needed debugging beyond its own CloudWatch logs.
+  **Revisit if:** this Lambda's logic grows complex enough that tracing
+  would meaningfully help debug it, or if it ever handles anything
+  beyond public World Bank reference data.
+
+## Evidence
+
+Full run output retained in the PR/commit introducing this section —
+44 findings, 2 fixed, 8 categories of the remainder reasoned through
+individually above rather than accepted as a block.

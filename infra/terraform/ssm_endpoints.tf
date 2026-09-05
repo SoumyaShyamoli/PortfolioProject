@@ -26,7 +26,7 @@ variable "enable_ssm_endpoints" {
     stateful.
   EOT
   type        = bool
-  default     = true
+  default     = false
 }
 
 locals {
@@ -92,28 +92,28 @@ resource "aws_vpc_endpoint" "glue" {
   }
 }
 
-resource "aws_vpc_endpoint" "snowflake_privatelink" {
-  count = var.enable_ssm_endpoints ? 1 : 0 # same toggle, same cost discipline as the other interface endpoints
+#resource "aws_vpc_endpoint" "snowflake_privatelink" {
+# count = var.enable_ssm_endpoints ? 1 : 0 # same toggle, same cost discipline as the other interface endpoints
 
-  vpc_id             = aws_vpc.main.id
-  service_name       = "com.amazonaws.vpce.eu-west-2.vpce-svc-0839061a5300e5ac1"
-  vpc_endpoint_type  = "Interface"
-  subnet_ids         = local.ssm_endpoint_subnet_ids
-  security_group_ids = [aws_security_group.ssm_endpoints[0].id]
+#vpc_id             = aws_vpc.main.id
+#service_name       = "com.amazonaws.vpce.eu-west-2.vpce-svc-0839061a5300e5ac1"
+#vpc_endpoint_type  = "Interface"
+#subnet_ids         = local.ssm_endpoint_subnet_ids
+#security_group_ids = [aws_security_group.ssm_endpoints[0].id]
 
-  # Enabling this is what lets AWS automatically create DNS entries for the
-  # *.privatelink.snowflakecomputing.com hostnames Snowflake returned —
-  # without it, the endpoint exists but nothing resolves to it and the
-  # connection string change below would fail to find a route.
-  private_dns_enabled = true
+# Enabling this is what lets AWS automatically create DNS entries for the
+# *.privatelink.snowflakecomputing.com hostnames Snowflake returned —
+# without it, the endpoint exists but nothing resolves to it and the
+# connection string change below would fail to find a route.
+#private_dns_enabled = true
 
-  tags = {
-    Name      = "retail-snowflake-privatelink"
-    Component = "ssm-endpoints"
-  }
-}
+#tags = {
+# Name      = "retail-snowflake-privatelink"
+# Component = "ssm-endpoints"
+#}
+#}
 
-output "snowflake_privatelink_state" {
-  description = "Check this immediately after apply — 'available' means usable now, 'pendingAcceptance' means Snowflake's side has to approve it first, which this project cannot force"
-  value       = try(aws_vpc_endpoint.snowflake_privatelink[0].state, "not created")
-}
+#output "snowflake_privatelink_state" {
+#  description = "Check this immediately after apply — 'available' means usable now, 'pendingAcceptance' means Snowflake's side has to approve it first, which this project cannot force"
+# value       = try(aws_vpc_endpoint.snowflake_privatelink[0].state, "not created")
+#}
