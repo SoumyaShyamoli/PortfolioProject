@@ -1,0 +1,26 @@
+# Single source of truth for Airflow's Python dependencies.
+#
+# Read by BOTH scripts/build_wheelhouse.sh (to know what to download) and
+# rendered into scripts/airflow_bootstrap.sh.tpl's install commands (to
+# know what to install from the wheelhouse) — previously these were two
+# separately hand-maintained lists that had to be kept in sync manually,
+# which is exactly the kind of drift that caused the Airflow-3.x silent
+# upgrade bug (ADR 0015's amendment). One file now; change it once.
+#
+# Grouped and commented to preserve the THREE-PASS install order that
+# matters (ADR 0015) — providers must be pinned against the SAME
+# constraints file as core, dbt/Snowflake/boto3 are a separate, unrelated
+# ecosystem installed unconstrained. The grouping here is informational;
+# build_wheelhouse.sh still issues three separate pip commands, it just
+# reads its package names from this file instead of hardcoding them twice.
+
+# --- Pass 1 & 2: Airflow core + providers (constrained together) ---
+apache-airflow==2.10.5
+apache-airflow-providers-amazon
+apache-airflow-providers-smtp
+
+# --- Pass 3: separate ecosystem, unconstrained ---
+dbt-core
+dbt-snowflake
+snowflake-connector-python
+boto3

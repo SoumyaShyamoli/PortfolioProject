@@ -32,6 +32,11 @@ resource "aws_sns_topic" "pipeline_alerts" {
 
   name = "retail-${each.key}-pipeline-alerts"
 
+  # AWS-managed key, no separate cost (unlike S3's CMK tradeoff — SNS's
+  # default KMS key is free to use, so there's no reason to accept this
+  # one the way ADR 0013 accepts S3's).
+  kms_master_key_id = "alias/aws/sns"
+
   tags = {
     Environment = each.key
   }
